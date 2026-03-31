@@ -17,9 +17,6 @@
     "test": "vitest run",
     "lint": "biome check src/"
   },
-  "peerDependencies": {
-    "@c9up/ream": "^0.1.0"
-  },
   "devDependencies": {
     "typescript": "^5.7",
     "vitest": "^3",
