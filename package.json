@@ -1,0 +1,31 @@
+{
+  "name": "@c9up/photon",
+  "version": "0.1.0",
+  "description": "Photon — Frontend rendering engine for the Ream framework",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "biome check src/"
+  },
+  "peerDependencies": {
+    "@c9up/ream": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7",
+    "vitest": "^3",
+    "@biomejs/biome": "^1"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
