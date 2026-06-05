@@ -1,0 +1,101 @@
+{
+	"name": "@c9up/photon",
+	"version": "0.1.0",
+	"description": "Photon — Frontend rendering engine for the Ream framework",
+	"license": "MIT",
+	"type": "module",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"import": "./src/index.ts"
+		},
+		"./provider": {
+			"types": "./src/PhotonProvider.ts",
+			"import": "./src/PhotonProvider.ts"
+		},
+		"./configure": {
+			"types": "./src/configure.ts",
+			"import": "./src/configure.ts"
+		},
+		"./client": {
+			"types": "./src/client/hydrate.ts",
+			"import": "./src/client/hydrate.ts"
+		}
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"test": "vitest run",
+		"lint": "biome check src/",
+		"test:coverage": "vitest run --coverage",
+		"typecheck": "tsc --noEmit"
+	},
+	"peerDependencies": {
+		"@c9up/ream": "^0.1.0",
+		"react": "*",
+		"react-dom": "*",
+		"vue": "*",
+		"svelte": "*"
+	},
+	"peerDependenciesMeta": {
+		"@c9up/ream": {
+			"optional": true
+		},
+		"react": {
+			"optional": true
+		},
+		"react-dom": {
+			"optional": true
+		},
+		"vue": {
+			"optional": true
+		},
+		"svelte": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"typescript": "^6.0.2",
+		"vitest": "^4.1.2",
+		"@biomejs/biome": "^2.4.10",
+		"jsdom": "^29.1.1",
+		"reflect-metadata": "^0.2.2"
+	},
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"files": [
+		"src",
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"main": "./dist/index.js",
+		"types": "./dist/index.d.ts",
+		"exports": {
+			".": {
+				"types": "./dist/index.d.ts",
+				"import": "./dist/index.js"
+			},
+			"./provider": {
+				"types": "./dist/PhotonProvider.d.ts",
+				"import": "./dist/PhotonProvider.js"
+			},
+			"./configure": {
+				"types": "./dist/configure.d.ts",
+				"import": "./dist/configure.js"
+			},
+			"./client": {
+				"types": "./dist/client/hydrate.d.ts",
+				"import": "./dist/client/hydrate.js"
+			}
+		},
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/C9up/photon.git"
+	}
+}
