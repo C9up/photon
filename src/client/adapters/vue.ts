@@ -7,7 +7,6 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import { dynamicImport } from "./_dynamic-import.js";
 import type { PhotonAdapter, PhotonAdapterHandle } from "./types.js";
 
 interface VueApp {
@@ -24,7 +23,8 @@ interface VueModule {
 
 export const vueAdapter: PhotonAdapter = {
 	async hydrate(target, Component, props): Promise<PhotonAdapterHandle> {
-		const vue = await dynamicImport<VueModule>("vue");
+		// Literal import so the consumer's Vite bundles the Vue runtime.
+		const vue: VueModule = await import("vue");
 		let app: VueApp | undefined = vue.createSSRApp(Component, props);
 		app.mount(target);
 

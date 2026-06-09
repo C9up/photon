@@ -9,7 +9,6 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import { dynamicImport } from "./_dynamic-import.js";
 import type { PhotonAdapter, PhotonAdapterHandle } from "./types.js";
 
 interface ReactRoot {
@@ -18,7 +17,7 @@ interface ReactRoot {
 }
 
 interface ReactDomClientModule {
-	hydrateRoot(target: Element | DocumentFragment, node: unknown): ReactRoot;
+	hydrateRoot(target: Element, node: unknown): ReactRoot;
 }
 
 interface ReactModule {
@@ -31,10 +30,12 @@ interface ReactModule {
 
 export const reactAdapter: PhotonAdapter = {
 	async hydrate(target, Component, props): Promise<PhotonAdapterHandle> {
-		const [reactDomClient, react] = await Promise.all([
-			dynamicImport<ReactDomClientModule>("react-dom/client"),
-			dynamicImport<ReactModule>("react"),
-		]);
+		// Literal dynamic imports so the consumer's bundler (Vite) code-splits
+		// and bundles the framework runtime. A wrapped/variable specifier (or
+		// `@vite-ignore`) would leave a bare `react-dom/client` specifier the
+		// browser can't resolve. Typed via the local interfaces above.
+		const [reactDomClient, react]: [ReactDomClientModule, ReactModule] =
+			await Promise.all([import("react-dom/client"), import("react")]);
 
 		let root: ReactRoot | undefined = reactDomClient.hydrateRoot(
 			target,

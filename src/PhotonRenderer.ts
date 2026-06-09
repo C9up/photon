@@ -134,21 +134,33 @@ export class PhotonRenderer {
 			// from "build ran but SSR entry is broken" (the post-loadSsrModule
 			// failure mode below). Distinct codes give operators distinct
 			// recovery instructions in the docs catalog.
-			const manifestPath = path.join(absBuildDir, "manifest.json");
-			try {
-				await access(manifestPath);
-			} catch (accessErr) {
-				// Forward the syscall error so EACCES / EPERM surface in the
-				// `cause` chain — the hint defaults to "missing", but the
-				// real fix may be a permission flip and operators need to see
-				// the underlying errno.
+			// Vite 5+ writes the manifest to `<outDir>/.vite/manifest.json`;
+			// older Vite (and `build.manifest: '<custom>'`) used the flat
+			// `<outDir>/manifest.json`. Probe the modern location first, then
+			// fall back, so the same Photon build works across Vite versions.
+			const manifestCandidates = [
+				path.join(absBuildDir, ".vite", "manifest.json"),
+				path.join(absBuildDir, "manifest.json"),
+			];
+			let manifestPath: string | undefined;
+			let lastAccessErr: unknown;
+			for (const candidate of manifestCandidates) {
+				try {
+					await access(candidate);
+					manifestPath = candidate;
+					break;
+				} catch (accessErr) {
+					lastAccessErr = accessErr;
+				}
+			}
+			if (manifestPath === undefined) {
 				throw new PhotonError(
 					"PHOTON_MANIFEST_MISSING",
-					`Vite manifest not accessible at ${manifestPath}.`,
+					`Vite manifest not accessible at ${manifestCandidates.join(" or ")}.`,
 					{
 						hint: "Run `pnpm build` (or your project's build script) and verify your deployment ships the build output. If the file exists but the process can't read it, check filesystem permissions on the build directory.",
-						context: { manifestPath, buildDir: absBuildDir },
-						cause: accessErr,
+						context: { manifestCandidates, buildDir: absBuildDir },
+						cause: lastAccessErr,
 					},
 				);
 			}

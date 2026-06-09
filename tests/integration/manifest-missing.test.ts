@@ -59,8 +59,13 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 
 		const err = await expectPhotonError(r.boot(), "missing-manifest precheck");
 		expect(err.code).toBe("PHOTON_MANIFEST_MISSING");
+		// Both manifest locations are probed: Vite 5+ writes
+		// `<outDir>/.vite/manifest.json`, older Vite the flat `manifest.json`.
 		expect(err.context).toEqual({
-			manifestPath: path.join(cwd, "public/build", "manifest.json"),
+			manifestCandidates: [
+				path.join(cwd, "public/build", ".vite", "manifest.json"),
+				path.join(cwd, "public/build", "manifest.json"),
+			],
 			buildDir: path.join(cwd, "public/build"),
 		});
 		// docsUrl must point at the matching anchor — operators jump from the

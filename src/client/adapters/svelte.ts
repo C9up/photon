@@ -12,7 +12,6 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import { dynamicImport } from "./_dynamic-import.js";
 import type { PhotonAdapter, PhotonAdapterHandle } from "./types.js";
 
 type SvelteInstance = unknown;
@@ -31,7 +30,8 @@ interface SvelteModule {
 
 export const svelteAdapter: PhotonAdapter = {
 	async hydrate(target, Component, props): Promise<PhotonAdapterHandle> {
-		const svelte = await dynamicImport<SvelteModule>("svelte");
+		// Literal import so the consumer's Vite bundles the Svelte 5 runtime.
+		const svelte: SvelteModule = await import("svelte");
 		if (
 			typeof svelte.hydrate !== "function" ||
 			typeof svelte.unmount !== "function"
