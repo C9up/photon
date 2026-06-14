@@ -472,6 +472,7 @@ async function loadSsrModule(
 		path.join(absBuildDir, "ssr", `${parsed.name}.js`),
 	];
 	const seen = new Set<string>();
+	let lastImportError: unknown;
 
 	for (const candidate of candidates) {
 		if (seen.has(candidate)) continue;
@@ -481,15 +482,43 @@ async function loadSsrModule(
 			if (mod && typeof mod.render === "function") {
 				return mod as { render: (page: PageProps) => Promise<string> | string };
 			}
-		} catch {
-			// Try next candidate.
+		} catch (err) {
+			// A genuine "file not found" just means try the next candidate. Any
+			// other failure means the bundle exists but threw at import time
+			// (syntax error, a throwing transitive dependency, a side-effect that
+			// throws) — keep it so we don't misreport it as "not found" and lose
+			// the stack, matching the cause-preserving handling used in boot().
+			if (!isModuleNotFound(err)) lastImportError = err;
 		}
+	}
+
+	if (lastImportError !== undefined) {
+		throw new PhotonError(
+			"PHOTON_SSR_LOAD_FAILED",
+			"SSR module exists but threw while importing",
+			{
+				hint:
+					lastImportError instanceof Error
+						? lastImportError.message
+						: String(lastImportError),
+				cause: lastImportError,
+				context: { candidates },
+			},
+		);
 	}
 
 	throw new PhotonError(
 		"PHOTON_SSR_LOAD_FAILED",
 		"SSR module not found or missing render() export",
+		{ context: { candidates } },
 	);
+}
+
+/** True for an ESM "module/file not found" import failure (vs a module that threw). */
+function isModuleNotFound(err: unknown): boolean {
+	if (typeof err !== "object" || err === null) return false;
+	const code = (err as { code?: unknown }).code;
+	return code === "ERR_MODULE_NOT_FOUND" || code === "ENOENT";
 }
 
 function getSafeOrigin(url: string): string | undefined {

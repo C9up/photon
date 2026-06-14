@@ -99,6 +99,39 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		expect(err.code).toBe("PHOTON_SSR_LOAD_FAILED");
 	});
 
+	it("regression: an SSR bundle that throws at import preserves the real error as cause", async () => {
+		// Before the fix the import error was swallowed (empty catch) and
+		// reported as the generic "not found or missing render()", losing the
+		// stack. A bundle that exists but throws at import time (syntax error,
+		// throwing transitive dep, throwing side-effect) must surface its real
+		// cause (audit 2026-06-13).
+		const buildDir = path.join(cwd, "public/build");
+		const ssrDir = path.join(buildDir, "ssr");
+		await fsp.mkdir(ssrDir, { recursive: true });
+		await fsp.writeFile(
+			path.join(ssrDir, "ssr.js"),
+			"throw new Error('boom from ssr bundle');\nexport function render() { return ''; }",
+			"utf8",
+		);
+		await fsp.writeFile(
+			path.join(buildDir, "manifest.json"),
+			JSON.stringify({}),
+			"utf8",
+		);
+
+		const r = new PhotonRenderer(baseConfig);
+		const err = await expectPhotonError(
+			r.boot(),
+			"SSR bundle throws at import",
+		);
+		expect(err.code).toBe("PHOTON_SSR_LOAD_FAILED");
+		expect(err.message).toContain("threw while importing");
+		expect(err.cause).toBeInstanceOf(Error);
+		if (err.cause instanceof Error) {
+			expect(err.cause.message).toContain("boom from ssr bundle");
+		}
+	});
+
 	it("malformed manifest JSON degrades silently after warn (SSR loads, manifest readFile fails inside best-effort catch)", async () => {
 		// The precheck only checks file presence, not JSON validity. With a
 		// valid SSR entry on disk, `loadSsrModule` succeeds and the boot path
