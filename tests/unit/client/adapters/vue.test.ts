@@ -87,4 +87,23 @@ describe("photon/client/adapters/vue", () => {
 		handle.unmount();
 		expect(unmount).toHaveBeenCalledTimes(1);
 	});
+
+	it("update() after unmount() is a no-op (no resurrect into a dead target)", async () => {
+		const createSSRApp = vi.fn(() => ({ mount: vi.fn(), unmount: vi.fn() }));
+		vi.doMock("vue", () => ({ createSSRApp }));
+		const { vueAdapter } = await import(
+			"../../../../src/client/adapters/vue.js"
+		);
+		const handle = await vueAdapter.hydrate(
+			defined(document.getElementById("app")),
+			"A",
+			{},
+		);
+		expect(createSSRApp).toHaveBeenCalledTimes(1); // initial hydrate
+		handle.unmount();
+		// React/Svelte guard parity: a post-unmount update must not recreate the
+		// app into a torn-down target (audit 2026-06-13).
+		handle.update("B", { v: 2 });
+		expect(createSSRApp).toHaveBeenCalledTimes(1);
+	});
 });

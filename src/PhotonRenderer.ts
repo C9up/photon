@@ -84,8 +84,9 @@ export class PhotonRenderer {
 	 */
 	async boot(): Promise<void> {
 		if (this.isDev) {
-			// In dev mode, SSR module is loaded via Vite's ssrLoadModule
-			// This is handled by the middleware proxying to Vite
+			// Dev mode: SSR is NOT wired yet — there is no Vite ssrLoadModule /
+			// dev-server proxy implemented. boot() returns early, so render() emits
+			// an empty `<div id="app">` shell that the client hydrates (audit 2026-06-13).
 			return;
 		}
 

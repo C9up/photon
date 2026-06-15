@@ -3,7 +3,8 @@
  *
  * - Attaches ctx.photon to every request
  * - Detects X-Photon header for SPA navigation (returns JSON props)
- * - Proxies to Vite dev server for HMR in development
+ * - Dev mode: no Vite HMR proxy is implemented yet — SSR is skipped in dev
+ *   (PhotonRenderer.boot() returns early), so the client hydrates an empty shell
  *
  * @implements FR89, FR92
  */

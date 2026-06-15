@@ -27,14 +27,20 @@ export const vueAdapter: PhotonAdapter = {
 		const vue: VueModule = await import("vue");
 		let app: VueApp | undefined = vue.createSSRApp(Component, props);
 		app.mount(target);
+		let unmounted = false;
 
 		return {
 			update(NextComponent, nextProps) {
+				// Don't resurrect a torn-down component into a dead target — parity
+				// with the React (`if (!root) return`) and Svelte (`if (isUnmounted)`)
+				// adapters' post-unmount guard (audit 2026-06-13).
+				if (unmounted) return;
 				app?.unmount();
 				app = vue.createSSRApp(NextComponent, nextProps);
 				app.mount(target);
 			},
 			unmount() {
+				unmounted = true;
 				app?.unmount();
 				app = undefined;
 			},
