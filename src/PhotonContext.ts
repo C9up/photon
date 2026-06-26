@@ -23,6 +23,13 @@ export interface PhotonContext {
 		meta?: MetaTags,
 	): Promise<RenderResult>;
 	/**
+	 * Share props across every `render()` of this request — AdonisJS Inertia's
+	 * `inertia.share({...})`. Use for cross-cutting data (auth user, flash, locale)
+	 * so handlers don't repeat it. Multiple calls shallow-merge (last wins per key);
+	 * a per-call `render(props)` key overrides a shared one.
+	 */
+	share(data: Record<string, unknown>): void;
+	/**
 	 * Imperatively set / accumulate `<head>` metadata for this request.
 	 * Multiple calls deep-merge (last wins per leaf field).
 	 */
@@ -49,8 +56,12 @@ export function createPhotonContext(
 	url: string,
 ): PhotonContext {
 	let accumulated: MetaTags | undefined;
+	let shared: Record<string, unknown> = {};
 
 	return {
+		share(data: Record<string, unknown>): void {
+			shared = { ...shared, ...data };
+		},
 		meta(tags: MetaTags): void {
 			accumulated = mergeMeta(accumulated, tags);
 		},
@@ -63,7 +74,13 @@ export function createPhotonContext(
 			meta?: MetaTags,
 		): Promise<RenderResult> {
 			const finalMeta = mergeMeta(accumulated, meta);
-			return renderer.render(component, props, url, finalMeta);
+			// Shared props are the base; per-call props win on key conflicts.
+			return renderer.render(
+				component,
+				{ ...shared, ...props },
+				url,
+				finalMeta,
+			);
 		},
 	};
 }

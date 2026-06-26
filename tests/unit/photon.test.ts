@@ -144,6 +144,25 @@ describe("photon > PhotonContext", () => {
 		expect(result.html).toContain("TestPage");
 		expect(result.html).toContain("foo");
 	});
+
+	it("share() merges props into every render; per-call props win on conflict", async () => {
+		const renderer = new PhotonRenderer({
+			framework: "react",
+			entryClient: "app.tsx",
+			entryServer: "ssr.tsx",
+		});
+		const ctx = createPhotonContext(renderer, "/test");
+		ctx.share({ sharedKey: "shared-value", overridden: "from-share" });
+		ctx.share({ second: "two" }); // merges with the first share()
+		const result = await ctx.render("Page", { overridden: "from-page" });
+		// shared props are present on the page payload…
+		expect(result.html).toContain("sharedKey");
+		expect(result.html).toContain("shared-value");
+		expect(result.html).toContain("second");
+		// …and a per-call prop overrides a shared one of the same key.
+		expect(result.html).toContain("from-page");
+		expect(result.html).not.toContain("from-share");
+	});
 });
 
 describe("photon > PhotonMiddleware", () => {

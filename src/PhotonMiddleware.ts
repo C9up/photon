@@ -134,6 +134,7 @@ export class PhotonMiddleware {
 					lastRenderArgs = { component, props, url, metaOverride: meta };
 					return baseContext.render(component, props, meta);
 				},
+				share: (data) => baseContext.share(data),
 				meta: (tags) => baseContext.meta(tags),
 				getAccumulatedMeta: () => baseContext.getAccumulatedMeta(),
 			};
