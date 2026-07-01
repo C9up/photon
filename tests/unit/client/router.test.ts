@@ -2,24 +2,33 @@
  * @vitest-environment jsdom
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mock,
+	vi,
+} from "vitest";
 import { hydrate } from "../../../src/client/hydrate.js";
+import type { ResolveComponent } from "../../../src/client/router.js";
 
 interface RouterTestState {
-	reactHydrate: ReturnType<typeof vi.fn>;
-	reactRender: ReturnType<typeof vi.fn>;
-	reactUnmount: ReturnType<typeof vi.fn>;
-	resolveComponent: ReturnType<typeof vi.fn>;
+	reactHydrate: Mock<(target: Element, node: unknown) => void>;
+	reactRender: Mock<() => void>;
+	reactUnmount: Mock<() => void>;
+	resolveComponent: Mock<ResolveComponent>;
 }
 
 async function bootHydratedReactPage(
 	initialUrl = "/start",
 ): Promise<RouterTestState> {
 	const state: RouterTestState = {
-		reactHydrate: vi.fn(),
-		reactRender: vi.fn(),
-		reactUnmount: vi.fn(),
-		resolveComponent: vi.fn(async (name: string) => ({
+		reactHydrate: vi.fn<(target: Element, node: unknown) => void>(),
+		reactRender: vi.fn<() => void>(),
+		reactUnmount: vi.fn<() => void>(),
+		resolveComponent: vi.fn<ResolveComponent>(async (name) => ({
 			default: { __name: name },
 		})),
 	};
@@ -104,7 +113,7 @@ describe("photon/client > router — interception", () => {
 		const anchor = createAnchor({ href: "/orders" });
 
 		const fetchMock = vi.fn(
-			async () =>
+			async (_url: string, _init: RequestInit) =>
 				new Response(
 					JSON.stringify({
 						component: "Orders",
@@ -129,7 +138,7 @@ describe("photon/client > router — interception", () => {
 
 		expect(event.defaultPrevented).toBe(true);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
-		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchMock.mock.calls[0];
 		expect(url).toBe("/orders");
 		expect((init.headers as Record<string, string>)["x-photon"]).toBe("true");
 		expect(init.credentials).toBe("same-origin");

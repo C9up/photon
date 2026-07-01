@@ -23,7 +23,10 @@ afterEach(() => {
 
 describe("photon/client/adapters/react", () => {
 	it("hydrate calls hydrateRoot with createElement(Component, props)", async () => {
-		const hydrateRoot = vi.fn(() => ({ render: vi.fn(), unmount: vi.fn() }));
+		const hydrateRoot = vi.fn((_target: Element, _node: unknown) => ({
+			render: vi.fn(),
+			unmount: vi.fn(),
+		}));
 		const createElement = vi.fn((type, props) => ({ type, props }));
 		vi.doMock("react-dom/client", () => ({ hydrateRoot }));
 		vi.doMock("react", () => ({ createElement }));

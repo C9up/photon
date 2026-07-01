@@ -22,7 +22,11 @@ afterEach(() => {
 
 describe("photon/client/adapters/svelte", () => {
 	it("hydrate calls svelte.hydrate(Component, { target, props })", async () => {
-		const hydrateFn = vi.fn(() => ({ id: "instance-1" }));
+		const hydrateFn = vi.fn(
+			(_component: unknown, _options: { target: Element; props: unknown }) => ({
+				id: "instance-1",
+			}),
+		);
 		vi.doMock("svelte", () => ({
 			hydrate: hydrateFn,
 			mount: vi.fn(),
@@ -36,10 +40,7 @@ describe("photon/client/adapters/svelte", () => {
 		await svelteAdapter.hydrate(target, "PageSvelte", { color: "red" });
 
 		expect(hydrateFn).toHaveBeenCalledTimes(1);
-		const call = hydrateFn.mock.calls[0] as [
-			unknown,
-			{ target: Element; props: unknown },
-		];
+		const call = hydrateFn.mock.calls[0];
 		expect(call[0]).toBe("PageSvelte");
 		expect(call[1].target).toBe(target);
 		expect(call[1].props).toEqual({ color: "red" });
@@ -47,7 +48,11 @@ describe("photon/client/adapters/svelte", () => {
 
 	it("update unmounts the previous instance and mounts the next one", async () => {
 		const hydrateFn = vi.fn(() => ({ id: "a" }));
-		const mountFn = vi.fn(() => ({ id: "b" }));
+		const mountFn = vi.fn(
+			(_component: unknown, _options: { target: Element; props: unknown }) => ({
+				id: "b",
+			}),
+		);
 		const unmountFn = vi.fn();
 		vi.doMock("svelte", () => ({
 			hydrate: hydrateFn,
@@ -64,10 +69,7 @@ describe("photon/client/adapters/svelte", () => {
 
 		expect(unmountFn).toHaveBeenCalledWith({ id: "a" });
 		expect(mountFn).toHaveBeenCalledTimes(1);
-		const mountCall = mountFn.mock.calls[0] as [
-			unknown,
-			{ target: Element; props: unknown },
-		];
+		const mountCall = mountFn.mock.calls[0];
 		expect(mountCall[0]).toBe("B");
 		expect(mountCall[1].props).toEqual({ v: 2 });
 	});

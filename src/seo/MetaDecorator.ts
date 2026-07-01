@@ -22,9 +22,9 @@ import type { MetaTags } from "./Meta.js";
 
 const META_KEY = "photon:meta";
 
-export type MetaResolver =
+export type MetaResolver<Ctx = unknown> =
 	| MetaTags
-	| ((ctx: unknown) => MetaTags | undefined | Promise<MetaTags | undefined>);
+	| ((ctx: Ctx) => MetaTags | undefined | Promise<MetaTags | undefined>);
 
 /**
  * Runtime type guard: a value is `MetaTags`-shaped if it is a non-null,
@@ -48,7 +48,9 @@ function isMetaTagsShape(value: unknown): value is MetaTags {
  *     async show(ctx) { ... }
  *   }
  */
-export function Meta(resolver: MetaResolver): MethodDecorator {
+export function Meta<Ctx = unknown>(
+	resolver: MetaResolver<Ctx>,
+): MethodDecorator {
 	return (target, propertyKey) => {
 		Reflect.defineMetadata(META_KEY, resolver, target, propertyKey);
 	};
@@ -85,9 +87,9 @@ export function getRouteMeta(
  * return value (string, number, array) is rejected at runtime and
  * surfaces as `undefined` to keep the merge layer honest.
  */
-export async function resolveMeta(
-	resolver: MetaResolver | undefined,
-	ctx: unknown,
+export async function resolveMeta<Ctx = unknown>(
+	resolver: MetaResolver<Ctx> | undefined,
+	ctx: Ctx,
 ): Promise<MetaTags | undefined> {
 	if (!resolver) return undefined;
 	if (typeof resolver === "function") {
