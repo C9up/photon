@@ -25,7 +25,9 @@
     }
   },
   "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "pnpm build",
     "test": "vitest run",
     "lint": "biome check src/",
     "test:coverage": "vitest run --coverage",
@@ -33,10 +35,10 @@
   },
   "peerDependencies": {
     "@c9up/ream": "^0.1.0",
-    "react": "*",
-    "react-dom": "*",
-    "vue": "*",
-    "svelte": "*"
+    "react": ">=18",
+    "react-dom": ">=18",
+    "vue": ">=3",
+    "svelte": ">=5"
   },
   "peerDependenciesMeta": {
     "@c9up/ream": {

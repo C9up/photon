@@ -31,10 +31,12 @@ const app = new Ignitor({ port: 3000 })
 
 ## Features
 
-- Server-side rendering (SSR) with client hydration
+- Server-side rendering (SSR) with client hydration — **in production** (the
+  built SSR module). In **dev** mode SSR is not yet wired: `boot()` returns early
+  and `render()` emits an empty `<div id="app"></div>` shell the client hydrates
+  (client-only render — the Vite dev-server SSR proxy is not implemented yet).
 - SPA navigation via `X-Photon` header (JSON props only)
-- Vite dev server integration with HMR
-- React, Vue, Svelte framework support
+- React (≥18), Vue (≥3), Svelte (≥5) framework support
 - Page data safely escaped in HTML
 - Production build with manifest-based asset loading
 
