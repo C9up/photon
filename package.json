@@ -1,6 +1,6 @@
 {
   "name": "@c9up/photon",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Photon — Frontend rendering engine for the Ream framework",
   "license": "MIT",
   "type": "module",

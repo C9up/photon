@@ -10,11 +10,11 @@ class FakeContainer {
 	singleton(token: unknown, factory: () => unknown) {
 		this.factories.set(token, factory);
 	}
-	resolve<T = unknown>(token: unknown): T {
+	async resolve<T = unknown>(token: unknown): Promise<T> {
 		if (this.cache.has(token)) return this.cache.get(token) as T;
 		const factory = this.factories.get(token);
 		if (!factory) throw new Error(`No binding for ${String(token)}`);
-		const value = factory();
+		const value = await factory();
 		this.cache.set(token, value);
 		return value as T;
 	}
@@ -40,7 +40,7 @@ function makeApp(config: Record<string, unknown>): {
 }
 
 describe("photon > PhotonProvider", () => {
-	it("register binds PhotonRenderer using the photon config", () => {
+	it("register binds PhotonRenderer using the photon config", async () => {
 		const { app, container } = makeApp({
 			photon: {
 				framework: "react",
@@ -49,12 +49,12 @@ describe("photon > PhotonProvider", () => {
 			},
 		});
 		new PhotonProvider(app).register();
-		const renderer = container.resolve<PhotonRenderer>(PhotonRenderer);
+		const renderer = await container.resolve<PhotonRenderer>(PhotonRenderer);
 		expect(renderer).toBeInstanceOf(PhotonRenderer);
 		expect(renderer.getFramework()).toBe("react");
 	});
 
-	it("register exposes the same instance under the 'photon' alias", () => {
+	it("register exposes the same instance under the 'photon' alias", async () => {
 		const { app, container } = makeApp({
 			photon: {
 				framework: "vue",
@@ -63,14 +63,16 @@ describe("photon > PhotonProvider", () => {
 			},
 		});
 		new PhotonProvider(app).register();
-		const a = container.resolve<PhotonRenderer>(PhotonRenderer);
-		const b = container.resolve<PhotonRenderer>("photon");
+		const a = await container.resolve<PhotonRenderer>(PhotonRenderer);
+		const b = await container.resolve<PhotonRenderer>("photon");
 		expect(a).toBe(b);
 	});
 
-	it("throws a clear error when no photon config is registered", () => {
+	it("throws a clear error when no photon config is registered", async () => {
 		const { app, container } = makeApp({}); // no 'photon' key
 		new PhotonProvider(app).register();
-		expect(() => container.resolve(PhotonRenderer)).toThrow(/Photon config/);
+		await expect(container.resolve(PhotonRenderer)).rejects.toThrow(
+			/Photon config/,
+		);
 	});
 });

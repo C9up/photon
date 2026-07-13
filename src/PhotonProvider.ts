@@ -3,7 +3,7 @@ import { PhotonRenderer } from "./PhotonRenderer.js";
 
 interface PhotonContainer {
 	singleton(token: unknown, factory: () => unknown): void;
-	resolve<T = unknown>(token: unknown): T;
+	resolve<T = unknown>(token: unknown): Promise<T>;
 }
 
 interface PhotonConfigStore {
@@ -26,13 +26,14 @@ export default class PhotonProvider {
 			return new PhotonRenderer(config);
 		});
 
-		this.app.container.singleton("photon", () => {
-			return this.app.container.resolve<PhotonRenderer>(PhotonRenderer);
+		this.app.container.singleton("photon", async () => {
+			return await this.app.container.resolve<PhotonRenderer>(PhotonRenderer);
 		});
 	}
 
 	async boot() {
-		const renderer = this.app.container.resolve<PhotonRenderer>(PhotonRenderer);
+		const renderer =
+			await this.app.container.resolve<PhotonRenderer>(PhotonRenderer);
 		await renderer.boot();
 	}
 
