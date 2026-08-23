@@ -13,8 +13,56 @@ import type { PhotonContext } from "./PhotonContext.js";
 import { createPhotonContext } from "./PhotonContext.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
+import { type PropsRequest, resolveProps } from "./props.js";
 import { type MetaTags, mergeMeta } from "./seo/Meta.js";
 import { getRouteMeta, resolveMeta } from "./seo/MetaDecorator.js";
+
+/** The single surface these validation errors need of a session flash bag. */
+interface FlashBagReader {
+	get(path: string | readonly string[], defaultValue?: unknown): unknown;
+}
+
+function flashBagOf(ctx: unknown): FlashBagReader | undefined {
+	const session = Reflect.get(Object(ctx), "session");
+	if (typeof session !== "object" || session === null) return undefined;
+	const bag = Reflect.get(session, "flashMessages");
+	if (typeof bag !== "object" || bag === null) return undefined;
+	const read = Reflect.get(bag, "get");
+	if (typeof read !== "function") return undefined;
+	return {
+		get: (path, fallback) => Reflect.apply(read, bag, [path, fallback]),
+	};
+}
+
+export interface ValidationErrorOptions {
+	/** Every message per field, rather than only the first one. */
+	allMessages?: boolean;
+}
+
+/**
+ * The validation errors the session flashed, in the shape a form reads.
+ *
+ * A page component does `errors.email`, so each field collapses to its FIRST
+ * message unless `allMessages` asks for the list. Nothing flashed, or no
+ * session at all, gives `{}` — never undefined, because a component that has
+ * to guard every read is a component that will forget to.
+ */
+export function getValidationErrors(
+	ctx: unknown,
+	options?: ValidationErrorOptions,
+): Record<string, unknown> {
+	const raw = flashBagOf(ctx)?.get("inputErrorsBag", {});
+	if (typeof raw !== "object" || raw === null) return {};
+	const errors: Record<string, unknown> = {};
+	for (const [field, messages] of Object.entries(raw)) {
+		if (options?.allMessages === true) {
+			errors[field] = Array.isArray(messages) ? messages : [messages];
+		} else {
+			errors[field] = Array.isArray(messages) ? messages[0] : messages;
+		}
+	}
+	return errors;
+}
 
 export interface PhotonMiddlewareContext {
 	request?: {
@@ -85,6 +133,66 @@ async function seedRouteMeta(
  *   const photon = PhotonMiddleware({ framework: 'react', entryClient: '...', entryServer: '...' })
  *   app.use(photon.middleware())
  */
+/** A comma-separated header list, trimmed and without empties. */
+function splitHeaderList(raw: string | undefined): string[] {
+	if (raw === undefined || raw.trim() === "") return [];
+	return raw
+		.split(",")
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0);
+}
+
+/** Methods whose redirect must become a 303 so the next hop is a GET. */
+const MUTATION_METHODS = new Set(["PUT", "PATCH", "DELETE"]);
+
+/** The request method, however the host exposes it. */
+function readMethod(ctx: PhotonMiddlewareContext): string {
+	const req = Reflect.get(Object(ctx), "request");
+	const viaMethod = Reflect.get(Object(req), "method");
+	if (typeof viaMethod === "function") {
+		const value = viaMethod.call(req);
+		return typeof value === "string" ? value.toUpperCase() : "GET";
+	}
+	return typeof viaMethod === "string" ? viaMethod.toUpperCase() : "GET";
+}
+
+/** The status already set on the response, however the host exposes it. */
+function readStatus(res: Record<string, unknown>): number | undefined {
+	const getter = Reflect.get(res, "getStatus");
+	if (typeof getter === "function") {
+		const value = getter.call(res);
+		return typeof value === "number" ? value : undefined;
+	}
+	const direct = Reflect.get(res, "statusCode") ?? Reflect.get(res, "status");
+	return typeof direct === "number" ? direct : undefined;
+}
+
+/** Write a bodyless response through whichever shape the host provides. */
+function writeResponse(
+	res: Record<string, unknown>,
+	status: number,
+	headers: Record<string, string>,
+): void {
+	const setStatus = Reflect.get(res, "status");
+	if (typeof setStatus === "function") {
+		setStatus.call(res, status);
+		const header = Reflect.get(res, "header");
+		if (typeof header === "function") {
+			for (const [k, v] of Object.entries(headers)) header.call(res, k, v);
+		}
+		const send = Reflect.get(res, "send");
+		if (typeof send === "function") send.call(res, "");
+		return;
+	}
+	res.status = status;
+	const existing = Reflect.get(res, "headers");
+	res.headers = {
+		...(typeof existing === "object" && existing !== null ? existing : {}),
+		...headers,
+	};
+	res.body = "";
+}
+
 export class PhotonMiddleware {
 	private renderer: PhotonRenderer;
 	private bootPromise?: Promise<void>;
@@ -135,16 +243,60 @@ export class PhotonMiddleware {
 					return baseContext.render(component, props, meta);
 				},
 				share: (data) => baseContext.share(data),
+				clearHistory: () => baseContext.clearHistory(),
+				encryptHistory: (encrypt) => baseContext.encryptHistory(encrypt),
+				flash: (provider) => baseContext.flash(provider),
+				resolvePageFlags: () => baseContext.resolvePageFlags(),
+				getVersion: () => baseContext.getVersion(),
+				ssrEnabled: (component) => baseContext.ssrEnabled(component),
+				sharedKeys: () => baseContext.sharedKeys(),
 				meta: (tags) => baseContext.meta(tags),
 				getAccumulatedMeta: () => baseContext.getAccumulatedMeta(),
+				location: (target) => baseContext.location(target),
+				takeLocation: () => baseContext.takeLocation(),
 			};
 
-			const xPhoton = req
-				? typeof req.header === "function"
-					? (req.header as (n: string) => string | undefined)("x-photon")
-					: (req.headers as Record<string, string> | undefined)?.["x-photon"]
-				: undefined;
-			const isPhotonRequest = xPhoton === "true";
+			const readHeader = (name: string): string | undefined => {
+				if (!req) return undefined;
+				const viaMethod = Reflect.get(Object(req), "header");
+				if (typeof viaMethod === "function") {
+					const value = viaMethod.call(req, name);
+					return typeof value === "string" ? value : undefined;
+				}
+				const bag = Reflect.get(Object(req), "headers");
+				const value =
+					typeof bag === "object" && bag !== null
+						? Reflect.get(bag, name)
+						: undefined;
+				return typeof value === "string" ? value : undefined;
+			};
+			const isPhotonRequest = readHeader("x-photon") === "true";
+			// Partial reload (AdonisJS Inertia's `x-inertia-partial-*`): reload a
+			// page without recomputing every prop. `component` guards it — a
+			// client asking about another page must not get a half-filled one.
+			const partial: PropsRequest = {
+				only: splitHeaderList(readHeader("x-photon-partial-data")),
+				except: splitHeaderList(readHeader("x-photon-partial-except")),
+				component: readHeader("x-photon-partial-component"),
+				// `reset` says "replace these, do not merge them" — the client
+				// clearing a list before loading its first page again.
+				reset: splitHeaderList(readHeader("x-photon-reset")),
+				// Once-keys the client still holds: those props are not resolved.
+				exceptOnce: splitHeaderList(readHeader("x-photon-except-once-props")),
+				// Which way a scroll prop's new page joins the rows already shown.
+				mergeIntent:
+					readHeader("x-photon-infinite-scroll-merge-intent") === "prepend"
+						? "prepend"
+						: "append",
+			};
+
+			// Validation errors are shared with every page: a form component reads
+			// `errors.email` unconditionally, so the key has to be there. An
+			// error-bag header scopes them, which is how two forms on one page
+			// keep their messages apart. A controller's own `errors` prop wins.
+			const errorBag = readHeader("x-photon-error-bag");
+			const errors = getValidationErrors(ctx);
+			baseContext.share({ errors: errorBag ? { [errorBag]: errors } : errors });
 
 			await next();
 
@@ -156,6 +308,52 @@ export class PhotonMiddleware {
 							"content-type"
 						]
 				: undefined;
+
+			// A 409 tells the SPA client to leave the fetch loop and navigate for
+			// real. Two things ask for it, and both must be answered BEFORE any
+			// props are rendered — there is no page to send in either case.
+			if (isPhotonRequest && res) {
+				const explicit = ctx.photon?.takeLocation?.();
+				const version = this.renderer.getVersion();
+				// ABSENT means "this client does not speak versioning", not
+				// "version empty". AdonisJS never meets the case — its client
+				// always sends the header — but ours predates it, and forcing a
+				// reload on every one of those requests would break them all.
+				const clientVersion = readHeader("x-photon-version");
+				const method = readMethod(ctx);
+				// An explicit `location()` wins; otherwise a stale asset version
+				// forces a hard reload of the SAME url so the client picks up the
+				// new bundles. Only on GET: replaying a mutation would be worse
+				// than a stale page.
+				const target =
+					explicit ??
+					(method === "GET" &&
+					clientVersion !== undefined &&
+					clientVersion !== version
+						? // The CURRENT url, not the last render: a stale version
+							// must reload where the client actually is, and it may
+							// have been rejected before any render ran.
+							url
+						: undefined);
+				if (target !== undefined) {
+					writeResponse(res, 409, {
+						"x-photon-location": target,
+						"x-photon-version": version,
+						vary: "x-photon",
+					});
+					return;
+				}
+				// A 302 after a mutation makes the browser repeat the method on
+				// the next hop; 303 forces the GET the client expects.
+				if (
+					MUTATION_METHODS.has(method) &&
+					readStatus(res) === 302 &&
+					typeof res.status === "function"
+				) {
+					const setStatus = Reflect.get(res, "status");
+					if (typeof setStatus === "function") setStatus.call(res, 303);
+				}
+			}
 
 			if (
 				isPhotonRequest &&
@@ -171,11 +369,20 @@ export class PhotonMiddleware {
 					baseContext.getAccumulatedMeta(),
 					lastRenderArgs.metaOverride,
 				);
+				// Resolve the props against the partial request: `only`/`except`
+				// narrow the set, `always()` survives it, and an `optional()`
+				// resolver runs ONLY if it was named.
+				const resolved = await resolveProps(
+					lastRenderArgs.props,
+					lastRenderArgs.component,
+					partial,
+				);
 				const propsOnly = this.renderer.renderProps(
 					lastRenderArgs.component,
-					lastRenderArgs.props,
+					resolved.props,
 					lastRenderArgs.url,
 					finalMeta,
+					{ ...resolved.extras, ...(await baseContext.resolvePageFlags()) },
 				);
 				if (typeof res.status === "function") {
 					(res.status as (c: number) => void)(propsOnly.status);

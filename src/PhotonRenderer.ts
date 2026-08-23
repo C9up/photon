@@ -4,13 +4,45 @@
  * @implements FR89, FR90, FR91, FR93
  */
 
+import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PhotonError } from "./errors.js";
+import { type PropsProtocolExtras, resolveProps } from "./props.js";
 import { type MetaTags, mergeMeta, serializeMetaTags } from "./seo/Meta.js";
 
 export type Framework = "react" | "vue" | "svelte";
+
+/**
+ * Response-level fields a render carries beside its props.
+ *
+ * Each is omitted from the payload unless set, because the client defaults
+ * them to off — an ordinary page stays an ordinary page on the wire.
+ */
+export interface PageFlags {
+	/** Drop the client's cached history state after this response. */
+	clearHistory?: boolean;
+	/** Encrypt the history state the client stores for this response. */
+	encryptHistory?: boolean;
+	/** A one-shot bag sent beside the props, not merged into them. */
+	flash?: unknown;
+}
+
+/**
+ * Which pages to server-render.
+ *
+ * DEVIATION (named): AdonisJS passes the HTTP context to the `pages` callback.
+ * Photon's renderer is deliberately context-free — it is constructed once and
+ * shared across requests — so the callback receives the component name alone.
+ * Gate on the request in the middleware instead.
+ */
+export interface SsrConfig {
+	/** Off entirely when false. Defaults to true when an SSR entry exists. */
+	enabled?: boolean;
+	/** Restrict SSR to these components, by list or by predicate. */
+	pages?: string[] | ((component: string) => boolean | Promise<boolean>);
+}
 
 export interface PhotonConfig {
 	/** Frontend framework. */
@@ -29,12 +61,36 @@ export interface PhotonConfig {
 	 * on top — last wins per leaf field.
 	 */
 	defaultMeta?: MetaTags;
+	/** Which pages to server-render. Every page, unless narrowed here. */
+	ssr?: SsrConfig;
 }
 
-export interface PageProps {
+/**
+ * The page object the client hydrates from.
+ *
+ * It extends the resolver's protocol extras, so every instruction the resolver
+ * can emit — deferred groups, merge labels, match keys — is part of the page
+ * shape without being restated here.
+ */
+export interface PageProps extends PropsProtocolExtras, PageFlags {
 	component: string;
 	props: Record<string, unknown>;
 	url: string;
+	/**
+	 * The asset fingerprint this page was built against.
+	 *
+	 * The client echoes it on its next request; when it no longer matches, the
+	 * server answers 409 and the browser does a hard load. Without it in the
+	 * page itself, a client that has only ever seen HTML has nothing to echo,
+	 * and a deploy mid-session goes unnoticed until something breaks.
+	 */
+	version: string;
+	/**
+	 * The keys `share()` contributed, so the client can carry them across an
+	 * instant visit instead of waiting for them again. Omitted when nothing is
+	 * shared, which keeps an ordinary page's payload unchanged.
+	 */
+	sharedProps?: string[];
 	/**
 	 * Frontend framework that hydrates this page on the client.
 	 * Mirrors `PhotonConfig.framework`; embedded in the page-data block so
@@ -66,6 +122,8 @@ export class PhotonRenderer {
 	private config: PhotonConfig;
 	private ssrModule?: { render: (page: PageProps) => Promise<string> | string };
 	private manifest?: Record<string, ViteManifestEntry | string[]>;
+	/** Memoised asset fingerprint — the manifest does not change at runtime. */
+	#cachedVersion?: string;
 	private isDev: boolean;
 	private viteOrigin?: string;
 
@@ -214,17 +272,62 @@ export class PhotonRenderer {
 	 * First request: returns full HTML (SSR + hydration script).
 	 * Subsequent navigation (X-Photon header): returns JSON props only.
 	 */
+	/**
+	 * The asset version — a fingerprint of the built manifest.
+	 *
+	 * The client sends the version it was served with; when it no longer
+	 * matches, the server answers 409 and the client does a hard reload so it
+	 * picks up the new bundles. Without it, a deploy leaves open tabs fetching
+	 * props for JavaScript they no longer have.
+	 *
+	 * `"1"` in development, where there is no manifest and the dev server
+	 * already handles reloading.
+	 */
+	getVersion(): string {
+		if (this.#cachedVersion !== undefined) return this.#cachedVersion;
+		this.#cachedVersion =
+			this.manifest === undefined
+				? "1"
+				: createHash("md5").update(JSON.stringify(this.manifest)).digest("hex");
+		return this.#cachedVersion;
+	}
+
+	/**
+	 * Whether `component` is server-rendered.
+	 *
+	 * Off entirely when `ssr.enabled` is false; otherwise narrowed by
+	 * `ssr.pages`, by list or by predicate. Everything is server-rendered when
+	 * neither is configured, which is what an app with an SSR entry expects.
+	 */
+	async ssrEnabled(component: string): Promise<boolean> {
+		const ssr = this.config.ssr;
+		if (ssr?.enabled === false) return false;
+		if (typeof ssr?.pages === "function") return ssr.pages(component);
+		if (ssr?.pages) return ssr.pages.includes(component);
+		return true;
+	}
+
 	async render(
 		component: string,
 		props: Record<string, unknown> = {},
 		url: string,
 		meta?: MetaTags,
+		flags: PageFlags = {},
+		sharedKeys: readonly string[] = [],
 	): Promise<RenderResult> {
+		// Unwrap the prop helpers before SSR too: a first load must see the same
+		// values a partial reload would, and an `optional()` resolver must stay
+		// uncalled here as well.
+		const resolved = await resolveProps(props, component);
 		const pageData: PageProps = {
 			component,
-			props,
+			props: resolved.props,
 			url,
 			framework: this.config.framework,
+			version: this.getVersion(),
+			...(sharedKeys.length > 0 ? { sharedProps: [...sharedKeys] } : {}),
+			...resolved.extras,
+			...flags,
 		};
 
 		// SPA-mode: return JSON props for client-side navigation
@@ -232,7 +335,7 @@ export class PhotonRenderer {
 
 		// SSR mode: render full HTML
 		let ssrHtml = "";
-		if (this.ssrModule) {
+		if (this.ssrModule && (await this.ssrEnabled(component))) {
 			try {
 				ssrHtml = await this.ssrModule.render(pageData);
 			} catch (err) {
@@ -302,6 +405,9 @@ export class PhotonRenderer {
 		props: Record<string, unknown>,
 		url: string,
 		meta?: MetaTags,
+		/** Protocol extras from the resolver — what the client must come back
+		 * for, and what it should combine rather than replace. */
+		extras?: PropsProtocolExtras & PageFlags,
 	): RenderResult {
 		const finalMeta = mergeMeta(this.config.defaultMeta, meta);
 		const hasMeta =
@@ -320,7 +426,9 @@ export class PhotonRenderer {
 				props,
 				url,
 				framework: this.config.framework,
+				version: this.getVersion(),
 				...(hasMeta ? { meta: finalMeta } : {}),
+				...extras,
 			}),
 			status: 200,
 			headers: {
