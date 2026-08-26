@@ -9,7 +9,26 @@
  * @implements FR89, FR92
  */
 
+// An EMPTY type import: it brings `@c9up/ream` into the program so the
+// augmentation below has a module to attach to, without importing a value or
+// creating a runtime dependency. ream is already a peer.
+import type {} from "@c9up/ream";
 import type { PhotonContext } from "./PhotonContext.js";
+
+/**
+ * Teach ream's `HttpContext` about `ctx.photon`, so a route handler can
+ * destructure it — `async ({ photon, response }) => …`.
+ *
+ * Declaration merging is how an AdonisJS package adds to the context
+ * (`@adonisjs/session` merges `session` the same way). Without it the
+ * middleware set the property at runtime and no consumer could see it.
+ */
+declare module "@c9up/ream" {
+	interface HttpContext {
+		photon: PhotonContext;
+	}
+}
+
 import { createPhotonContext } from "./PhotonContext.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
