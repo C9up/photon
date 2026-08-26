@@ -1,7 +1,7 @@
 {
   "name": "@c9up/photon",
   "version": "0.1.10",
-  "description": "Photon — Frontend rendering engine for the Ream framework",
+  "description": "Photon \u2014 Frontend rendering engine for the Ream framework",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -59,6 +59,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
+    "@c9up/ream": "^0.1.0",
     "@types/node": "^22.19.15",
     "@types/react": "^19",
     "@types/react-dom": "^19",
