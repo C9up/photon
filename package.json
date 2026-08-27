@@ -1,6 +1,6 @@
 {
   "name": "@c9up/photon",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Photon \u2014 Frontend rendering engine for the Ream framework",
   "license": "MIT",
   "type": "module",
@@ -34,7 +34,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@c9up/ream": "^0.1.0",
+    "@c9up/ream": "^0.2.0",
     "react": ">=18",
     "react-dom": ">=18",
     "vue": ">=3",
@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
-    "@c9up/ream": "^0.1.0",
+    "@c9up/ream": "^0.2.0",
     "@types/node": "^22.19.15",
     "@types/react": "^19",
     "@types/react-dom": "^19",
