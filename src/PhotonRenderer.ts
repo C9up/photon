@@ -118,21 +118,40 @@ interface ViteManifestEntry {
 /**
  * Photon Renderer — handles SSR and page data serialization.
  */
+/** What a server-rendering entry point has to provide. */
+export interface SsrModule {
+	render(page: PageProps): Promise<string> | string;
+}
+
 export class PhotonRenderer {
-	private config: PhotonConfig;
-	private ssrModule?: { render: (page: PageProps) => Promise<string> | string };
-	private manifest?: Record<string, ViteManifestEntry | string[]>;
+	#config: PhotonConfig;
+	#ssrModule?: SsrModule;
+	#manifest?: Record<string, ViteManifestEntry | string[]>;
 	/** Memoised asset fingerprint — the manifest does not change at runtime. */
 	#cachedVersion?: string;
-	private isDev: boolean;
-	private viteOrigin?: string;
+	#isDev: boolean;
+	#viteOrigin?: string;
+
+	/**
+	 * Install a server-rendering module directly, instead of loading one from
+	 * the build output.
+	 *
+	 * `boot()` normally reads it from `entryServer`, which needs a real build on
+	 * disk. A host that already holds the module — and a test exercising the
+	 * render path — hands it over here rather than reaching into the instance:
+	 * the field is genuinely private, so there is nothing to reach into.
+	 */
+	useSsrModule(ssrModule: SsrModule): this {
+		this.#ssrModule = ssrModule;
+		return this;
+	}
 
 	constructor(config: PhotonConfig) {
-		this.config = config;
-		this.isDev = process.env.NODE_ENV !== "production";
-		if (this.isDev) {
-			this.viteOrigin = getSafeOrigin(
-				this.config.viteDevUrl ?? "http://localhost:5173",
+		this.#config = config;
+		this.#isDev = process.env.NODE_ENV !== "production";
+		if (this.#isDev) {
+			this.#viteOrigin = getSafeOrigin(
+				this.#config.viteDevUrl ?? "http://localhost:5173",
 			);
 		}
 	}
@@ -141,7 +160,7 @@ export class PhotonRenderer {
 	 * Initialize the renderer — load SSR module and manifest.
 	 */
 	async boot(): Promise<void> {
-		if (this.isDev) {
+		if (this.#isDev) {
 			// Dev mode: SSR is NOT wired yet — there is no Vite ssrLoadModule /
 			// dev-server proxy implemented. boot() returns early, so render() emits
 			// an empty `<div id="app">` shell that the client hydrates (audit 2026-06-13).
@@ -151,7 +170,7 @@ export class PhotonRenderer {
 		// Production: load the built SSR module and manifest
 		try {
 			const projectRoot = path.resolve(process.cwd());
-			const buildDir = this.config.buildDir ?? "public/build";
+			const buildDir = this.#config.buildDir ?? "public/build";
 			// Validate buildDir is within project root. `path.resolve` already
 			// normalises `..` segments, but a buildDir that *equals* the project
 			// root (`""`, `"."`, `"public/.."`) yields an empty relative path
@@ -172,8 +191,8 @@ export class PhotonRenderer {
 			}
 			const entryPattern = /^[\w./\-@#]+\.(tsx?|jsx?|vue|svelte)$/;
 			if (
-				!entryPattern.test(this.config.entryServer) ||
-				this.config.entryServer.split("/").includes("..")
+				!entryPattern.test(this.#config.entryServer) ||
+				this.#config.entryServer.split("/").includes("..")
 			) {
 				throw new PhotonError(
 					"PHOTON_INVALID_CONFIG",
@@ -181,8 +200,8 @@ export class PhotonRenderer {
 				);
 			}
 			if (
-				!entryPattern.test(this.config.entryClient) ||
-				this.config.entryClient.split("/").includes("..")
+				!entryPattern.test(this.#config.entryClient) ||
+				this.#config.entryClient.split("/").includes("..")
 			) {
 				throw new PhotonError(
 					"PHOTON_INVALID_CONFIG",
@@ -225,12 +244,12 @@ export class PhotonRenderer {
 			}
 			const ssrModule = await loadSsrModule(
 				absBuildDir,
-				this.config.entryServer,
+				this.#config.entryServer,
 			);
-			this.ssrModule = ssrModule;
+			this.#ssrModule = ssrModule;
 			try {
 				const manifestRaw = await readFile(manifestPath, "utf8");
-				this.manifest = JSON.parse(manifestRaw) as Record<
+				this.#manifest = JSON.parse(manifestRaw) as Record<
 					string,
 					ViteManifestEntry | string[]
 				>;
@@ -286,9 +305,11 @@ export class PhotonRenderer {
 	getVersion(): string {
 		if (this.#cachedVersion !== undefined) return this.#cachedVersion;
 		this.#cachedVersion =
-			this.manifest === undefined
+			this.#manifest === undefined
 				? "1"
-				: createHash("md5").update(JSON.stringify(this.manifest)).digest("hex");
+				: createHash("md5")
+						.update(JSON.stringify(this.#manifest))
+						.digest("hex");
 		return this.#cachedVersion;
 	}
 
@@ -300,7 +321,7 @@ export class PhotonRenderer {
 	 * neither is configured, which is what an app with an SSR entry expects.
 	 */
 	async ssrEnabled(component: string): Promise<boolean> {
-		const ssr = this.config.ssr;
+		const ssr = this.#config.ssr;
 		if (ssr?.enabled === false) return false;
 		if (typeof ssr?.pages === "function") return ssr.pages(component);
 		if (ssr?.pages) return ssr.pages.includes(component);
@@ -323,7 +344,7 @@ export class PhotonRenderer {
 			component,
 			props: resolved.props,
 			url,
-			framework: this.config.framework,
+			framework: this.#config.framework,
 			version: this.getVersion(),
 			...(sharedKeys.length > 0 ? { sharedProps: [...sharedKeys] } : {}),
 			...resolved.extras,
@@ -335,9 +356,9 @@ export class PhotonRenderer {
 
 		// SSR mode: render full HTML
 		let ssrHtml = "";
-		if (this.ssrModule && (await this.ssrEnabled(component))) {
+		if (this.#ssrModule && (await this.ssrEnabled(component))) {
 			try {
-				ssrHtml = await this.ssrModule.render(pageData);
+				ssrHtml = await this.#ssrModule.render(pageData);
 			} catch (err) {
 				// Log the real error internally, give generic message to callers
 				throw new PhotonError(
@@ -359,9 +380,9 @@ export class PhotonRenderer {
 		}
 
 		const pageDataJson = JSON.stringify(pageData);
-		const assets = this.getAssets();
+		const assets = this.#getAssets();
 		const headTags = serializeMetaTags(
-			mergeMeta(this.config.defaultMeta, meta),
+			mergeMeta(this.#config.defaultMeta, meta),
 		);
 
 		const html = `<!DOCTYPE html>
@@ -383,7 +404,7 @@ export class PhotonRenderer {
 			status: 200,
 			headers: {
 				"content-type": "text/html; charset=utf-8",
-				"content-security-policy": this.buildCspHeader(),
+				"content-security-policy": this.#buildCspHeader(),
 				"x-content-type-options": "nosniff",
 				"x-frame-options": "SAMEORIGIN",
 			},
@@ -409,7 +430,7 @@ export class PhotonRenderer {
 		 * for, and what it should combine rather than replace. */
 		extras?: PropsProtocolExtras & PageFlags,
 	): RenderResult {
-		const finalMeta = mergeMeta(this.config.defaultMeta, meta);
+		const finalMeta = mergeMeta(this.#config.defaultMeta, meta);
 		const hasMeta =
 			finalMeta &&
 			(finalMeta.title !== undefined ||
@@ -425,7 +446,7 @@ export class PhotonRenderer {
 				component,
 				props,
 				url,
-				framework: this.config.framework,
+				framework: this.#config.framework,
 				version: this.getVersion(),
 				...(hasMeta ? { meta: finalMeta } : {}),
 				...extras,
@@ -442,39 +463,42 @@ export class PhotonRenderer {
 	 * Get the framework adapter name.
 	 */
 	getFramework(): Framework {
-		return this.config.framework;
+		return this.#config.framework;
 	}
 
-	private getAssets(): { css: string[]; js: string[] } {
-		if (this.isDev) {
-			const viteUrl = this.viteOrigin ?? "http://localhost:5173";
+	#getAssets(): { css: string[]; js: string[] } {
+		if (this.#isDev) {
+			const viteUrl = this.#viteOrigin ?? "http://localhost:5173";
 			return {
 				css: [],
 				js: [
 					`${viteUrl}/@vite/client`,
-					`${viteUrl}/${this.config.entryClient}`,
+					`${viteUrl}/${this.#config.entryClient}`,
 				],
 			};
 		}
 
 		// Production: read from manifest
-		const buildDir = this.config.buildDir ?? "public/build";
-		if (!this.manifest) {
+		const buildDir = this.#config.buildDir ?? "public/build";
+		if (!this.#manifest) {
 			return { css: [], js: [`/${buildDir}/client.js`] };
 		}
 
-		const entry = resolveManifestEntry(this.manifest, this.config.entryClient);
+		const entry = resolveManifestEntry(
+			this.#manifest,
+			this.#config.entryClient,
+		);
 		if (entry) {
 			const js = collectManifestAssets(
-				this.manifest,
-				this.config.entryClient,
+				this.#manifest,
+				this.#config.entryClient,
 				"js",
 			)
 				.map((f) => `/${buildDir}/${f}`)
 				.filter((u) => isSafeUrl(u) && !u.includes(".."));
 			const css = collectManifestAssets(
-				this.manifest,
-				this.config.entryClient,
+				this.#manifest,
+				this.#config.entryClient,
 				"css",
 			)
 				.map((f) => `/${buildDir}/${f}`)
@@ -483,14 +507,14 @@ export class PhotonRenderer {
 		}
 
 		// Backward-compatible fallback for older manifest shapes.
-		const css = Object.entries(this.manifest)
+		const css = Object.entries(this.#manifest)
 			.filter(([key]) => key.endsWith(".css"))
 			.filter(([, v]) => Array.isArray(v))
 			.flatMap(([, files]) => files as string[])
 			.map((f) => `/${buildDir}/${f}`)
 			.filter((u) => isSafeUrl(u) && !u.includes(".."));
 
-		const js = Object.entries(this.manifest)
+		const js = Object.entries(this.#manifest)
 			.filter(
 				([key]) =>
 					key.endsWith(".js") || key.endsWith(".tsx") || key.endsWith(".vue"),
@@ -503,13 +527,13 @@ export class PhotonRenderer {
 		return { css, js };
 	}
 
-	private buildCspHeader(): string {
-		if (this.isDev && this.viteOrigin) {
+	#buildCspHeader(): string {
+		if (this.#isDev && this.#viteOrigin) {
 			return [
 				"default-src 'self'",
-				`script-src 'self' ${this.viteOrigin}`,
-				`connect-src 'self' ${this.viteOrigin} ws: wss:`,
-				`style-src 'self' ${this.viteOrigin} 'unsafe-inline'`,
+				`script-src 'self' ${this.#viteOrigin}`,
+				`connect-src 'self' ${this.#viteOrigin} ws: wss:`,
+				`style-src 'self' ${this.#viteOrigin} 'unsafe-inline'`,
 				"object-src 'none'",
 			].join("; ");
 		}

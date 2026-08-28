@@ -213,11 +213,11 @@ function writeResponse(
 }
 
 export class PhotonMiddleware {
-	private renderer: PhotonRenderer;
-	private bootPromise?: Promise<void>;
+	#renderer: PhotonRenderer;
+	#bootPromise?: Promise<void>;
 
 	constructor(config: PhotonConfig) {
-		this.renderer = new PhotonRenderer(config);
+		this.#renderer = new PhotonRenderer(config);
 	}
 
 	/**
@@ -226,13 +226,13 @@ export class PhotonMiddleware {
 	middleware() {
 		return async (ctx: PhotonMiddlewareContext, next: () => Promise<void>) => {
 			// Boot renderer once (race-safe via promise latch)
-			if (!this.bootPromise) {
-				this.bootPromise = this.renderer.boot().catch((err) => {
-					this.bootPromise = undefined;
+			if (!this.#bootPromise) {
+				this.#bootPromise = this.#renderer.boot().catch((err) => {
+					this.#bootPromise = undefined;
 					throw err;
 				});
 			}
-			await this.bootPromise;
+			await this.#bootPromise;
 
 			const req = ctx.request as Record<string, unknown> | undefined;
 			const url = req
@@ -249,7 +249,7 @@ export class PhotonMiddleware {
 						metaOverride?: MetaTags;
 				  }
 				| undefined;
-			const baseContext = createPhotonContext(this.renderer, url);
+			const baseContext = createPhotonContext(this.#renderer, url);
 
 			// Seed the per-request meta accumulator from `@Meta()` on the
 			// route handler before next() so the controller can still
@@ -333,7 +333,7 @@ export class PhotonMiddleware {
 			// props are rendered — there is no page to send in either case.
 			if (isPhotonRequest && res) {
 				const explicit = ctx.photon?.takeLocation?.();
-				const version = this.renderer.getVersion();
+				const version = this.#renderer.getVersion();
 				// ABSENT means "this client does not speak versioning", not
 				// "version empty". AdonisJS never meets the case — its client
 				// always sends the header — but ours predates it, and forcing a
@@ -396,7 +396,7 @@ export class PhotonMiddleware {
 					lastRenderArgs.component,
 					partial,
 				);
-				const propsOnly = this.renderer.renderProps(
+				const propsOnly = this.#renderer.renderProps(
 					lastRenderArgs.component,
 					resolved.props,
 					lastRenderArgs.url,
@@ -428,6 +428,6 @@ export class PhotonMiddleware {
 	 * Get the renderer instance (for direct access in providers).
 	 */
 	getRenderer(): PhotonRenderer {
-		return this.renderer;
+		return this.#renderer;
 	}
 }

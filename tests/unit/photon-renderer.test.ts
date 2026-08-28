@@ -134,12 +134,11 @@ describe("photon > PhotonRenderer > render() with an SSR module", () => {
 		r: PhotonRenderer,
 		render: (page: PageProps) => string | Promise<string>,
 	) {
-		// The SSR module is private — use a structural override on `r` to inject
-		// it. This mirrors what `boot()` does internally in production mode.
-		const target = r as unknown as {
-			ssrModule: { render: (page: PageProps) => string | Promise<string> };
-		};
-		target.ssrModule = { render };
+		// Through the public seam, not a cast: the field is a real private now,
+		// so the previous `as unknown as { ssrModule }` override could not reach
+		// it — and never should have. `useSsrModule` is what `boot()` does after
+		// loading the module from the build output.
+		r.useSsrModule({ render });
 	}
 
 	it("calls ssrModule.render() and embeds the returned HTML inside #app", async () => {
