@@ -266,8 +266,9 @@ export class PhotonRenderer {
 			}
 		} catch (err) {
 			// Re-throw structured PhotonError instances unchanged so callers
-			// see the precise code (E_INVALID_CONFIG / MANIFEST_MISSING) instead
-			// of every prod-boot failure collapsing into SSR_LOAD_FAILED.
+			// see the precise code (E_PHOTON_INVALID_CONFIG /
+			// E_PHOTON_MANIFEST_MISSING) instead of every prod-boot failure
+			// collapsing into E_PHOTON_SSR_LOAD_FAILED.
 			// Cross-realm fallback: if a duplicated `@c9up/photon` copy in the
 			// SSR bundle (workspace dep duplication, worker thread, vm context)
 			// throws its own PhotonError, the `instanceof` check fails despite
