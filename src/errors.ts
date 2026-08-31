@@ -13,17 +13,17 @@
  * `tests/integration/error-catalog.test.ts` enforces source ↔ docs parity.
  */
 export type PhotonErrorCode =
-	| "PHOTON_INVALID_CONFIG"
-	| "PHOTON_SSR_LOAD_FAILED"
-	| "PHOTON_SSR_RENDER_FAILED"
-	| "PHOTON_MANIFEST_MISSING";
+	| "E_PHOTON_INVALID_CONFIG"
+	| "E_PHOTON_SSR_LOAD_FAILED"
+	| "E_PHOTON_SSR_RENDER_FAILED"
+	| "E_PHOTON_MANIFEST_MISSING";
 
 /**
  * Base URL for the Photon error catalog. The `docsUrl` getter appends
  * `/errors/#<slug>`, where `<slug>` is `code.toLowerCase().replace(/_/g, '-')`.
  *
  * VitePress 1.x's default slugify treats `_` as a separator and rewrites it
- * to `-` (see `vitepress@1.6.4`'s `rSpecial` regex), so `### PHOTON_INVALID_CONFIG`
+ * to `-` (see `vitepress@1.6.4`'s `rSpecial` regex), so `### E_PHOTON_INVALID_CONFIG`
  * generates `#photon-invalid-config`. Verified empirically against the docs
  * site's chunked slugify before this getter was wired in.
  *
@@ -34,7 +34,10 @@ export type PhotonErrorCode =
 export const PHOTON_DOCS_BASE_URL = "https://ream.dev";
 
 function codeToAnchor(code: PhotonErrorCode): string {
-	return code.toLowerCase().replace(/_/g, "-");
+	// The `E_` prefix is part of the code, not of the heading it points at —
+	// the published catalog anchors are `#photon-…`, so leaving it in produced
+	// `#e-photon-…` and every documentation link 404'd.
+	return code.replace(/^E_/, "").toLowerCase().replace(/_/g, "-");
 }
 
 /**

@@ -51,14 +51,14 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		else process.env.NODE_ENV = origEnv;
 	});
 
-	it("throws PHOTON_MANIFEST_MISSING with manifestPath context when manifest.json is absent", async () => {
+	it("throws E_PHOTON_MANIFEST_MISSING with manifestPath context when manifest.json is absent", async () => {
 		// buildDir exists but contains no manifest.json — the most common
 		// "build never ran for this deployment" failure mode.
 		await fsp.mkdir(path.join(cwd, "public/build"), { recursive: true });
 		const r = new PhotonRenderer(baseConfig);
 
 		const err = await expectPhotonError(r.boot(), "missing-manifest precheck");
-		expect(err.code).toBe("PHOTON_MANIFEST_MISSING");
+		expect(err.code).toBe("E_PHOTON_MANIFEST_MISSING");
 		// Both manifest locations are probed: Vite 5+ writes
 		// `<outDir>/.vite/manifest.json`, older Vite the flat `manifest.json`.
 		expect(err.context).toEqual({
@@ -78,7 +78,7 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		expect(err.cause).toBeInstanceOf(Error);
 	});
 
-	it("regression: manifest present but SSR entry missing still throws PHOTON_SSR_LOAD_FAILED", async () => {
+	it("regression: manifest present but SSR entry missing still throws E_PHOTON_SSR_LOAD_FAILED", async () => {
 		// Counter-test for the split: writing a manifest passes the precheck,
 		// after which the missing SSR entry triggers the original load failure.
 		// Without this guard the new precheck could over-fire and swallow real
@@ -96,7 +96,7 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 			r.boot(),
 			"present-manifest + absent-SSR",
 		);
-		expect(err.code).toBe("PHOTON_SSR_LOAD_FAILED");
+		expect(err.code).toBe("E_PHOTON_SSR_LOAD_FAILED");
 	});
 
 	it("regression: an SSR bundle that throws at import preserves the real error as cause", async () => {
@@ -124,7 +124,7 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 			r.boot(),
 			"SSR bundle throws at import",
 		);
-		expect(err.code).toBe("PHOTON_SSR_LOAD_FAILED");
+		expect(err.code).toBe("E_PHOTON_SSR_LOAD_FAILED");
 		expect(err.message).toContain("threw while importing");
 		expect(err.cause).toBeInstanceOf(Error);
 		if (err.cause instanceof Error) {

@@ -185,7 +185,7 @@ export class PhotonRenderer {
 				path.isAbsolute(rel)
 			) {
 				throw new PhotonError(
-					"PHOTON_INVALID_CONFIG",
+					"E_PHOTON_INVALID_CONFIG",
 					"buildDir must be a subdirectory of the project root",
 				);
 			}
@@ -195,7 +195,7 @@ export class PhotonRenderer {
 				this.#config.entryServer.split("/").includes("..")
 			) {
 				throw new PhotonError(
-					"PHOTON_INVALID_CONFIG",
+					"E_PHOTON_INVALID_CONFIG",
 					"entryServer path is invalid or contains path traversal",
 				);
 			}
@@ -204,7 +204,7 @@ export class PhotonRenderer {
 				this.#config.entryClient.split("/").includes("..")
 			) {
 				throw new PhotonError(
-					"PHOTON_INVALID_CONFIG",
+					"E_PHOTON_INVALID_CONFIG",
 					"entryClient path is invalid or contains path traversal",
 				);
 			}
@@ -233,7 +233,7 @@ export class PhotonRenderer {
 			}
 			if (manifestPath === undefined) {
 				throw new PhotonError(
-					"PHOTON_MANIFEST_MISSING",
+					"E_PHOTON_MANIFEST_MISSING",
 					`Vite manifest not accessible at ${manifestCandidates.join(" or ")}.`,
 					{
 						hint: "Run `pnpm build` (or your project's build script) and verify your deployment ships the build output. If the file exists but the process can't read it, check filesystem permissions on the build directory.",
@@ -266,7 +266,7 @@ export class PhotonRenderer {
 			}
 		} catch (err) {
 			// Re-throw structured PhotonError instances unchanged so callers
-			// see the precise code (INVALID_CONFIG / MANIFEST_MISSING) instead
+			// see the precise code (E_INVALID_CONFIG / MANIFEST_MISSING) instead
 			// of every prod-boot failure collapsing into SSR_LOAD_FAILED.
 			// Cross-realm fallback: if a duplicated `@c9up/photon` copy in the
 			// SSR bundle (workspace dep duplication, worker thread, vm context)
@@ -275,7 +275,7 @@ export class PhotonRenderer {
 			// belt-and-suspenders second guard.
 			if (err instanceof PhotonError || isPhotonErrorShaped(err)) throw err;
 			throw new PhotonError(
-				"PHOTON_SSR_LOAD_FAILED",
+				"E_PHOTON_SSR_LOAD_FAILED",
 				`Failed to load SSR module: ${err instanceof Error ? err.message : String(err)}`,
 				{
 					hint: "Run `ream build` first to generate the SSR bundle.",
@@ -362,7 +362,7 @@ export class PhotonRenderer {
 			} catch (err) {
 				// Log the real error internally, give generic message to callers
 				throw new PhotonError(
-					"PHOTON_SSR_RENDER_FAILED",
+					"E_PHOTON_SSR_RENDER_FAILED",
 					"Server-side rendering failed",
 					{
 						hint: err instanceof Error ? err.message : String(err),
@@ -373,7 +373,7 @@ export class PhotonRenderer {
 			// Validate SSR output
 			if (typeof ssrHtml !== "string") {
 				throw new PhotonError(
-					"PHOTON_SSR_RENDER_FAILED",
+					"E_PHOTON_SSR_RENDER_FAILED",
 					"SSR module returned non-string output",
 				);
 			}
@@ -583,7 +583,14 @@ function isPhotonErrorShaped(err: unknown): boolean {
 	if (typeof err !== "object" || err === null) return false;
 	if (!("code" in err)) return false;
 	const { code } = err;
-	return typeof code === "string" && code.startsWith("PHOTON_");
+	// `E_PHOTON_` is the code prefix; the bare `PHOTON_` form is what earlier
+	// releases emitted. Both are recognised, so an error crossing a realm
+	// boundary — a duplicated SSR bundle, a worker, a VM context — keeps its
+	// own code, context and cause instead of being rewrapped as a generic one.
+	return (
+		typeof code === "string" &&
+		(code.startsWith("E_PHOTON_") || code.startsWith("PHOTON_"))
+	);
 }
 
 /** Return true if the URL is safe for use in src/href attributes. */
@@ -627,7 +634,7 @@ async function loadSsrModule(
 
 	if (lastImportError !== undefined) {
 		throw new PhotonError(
-			"PHOTON_SSR_LOAD_FAILED",
+			"E_PHOTON_SSR_LOAD_FAILED",
 			"SSR module exists but threw while importing",
 			{
 				hint:
@@ -641,7 +648,7 @@ async function loadSsrModule(
 	}
 
 	throw new PhotonError(
-		"PHOTON_SSR_LOAD_FAILED",
+		"E_PHOTON_SSR_LOAD_FAILED",
 		"SSR module not found or missing render() export",
 		{ context: { candidates } },
 	);

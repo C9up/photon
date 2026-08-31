@@ -120,36 +120,36 @@ describe("photon/client > hydrate — happy path", () => {
 });
 
 describe("photon/client > hydrate — error paths", () => {
-	it("throws PHOTON_HYDRATION_NO_DATA when the script block is absent", async () => {
+	it("throws E_PHOTON_HYDRATION_NO_DATA when the script block is absent", async () => {
 		document.documentElement.innerHTML = '<div id="app">SSR</div>';
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_NO_DATA",
+			code: "E_PHOTON_HYDRATION_NO_DATA",
 		});
 	});
 
-	it("throws PHOTON_HYDRATION_BAD_DATA when the JSON is malformed", async () => {
+	it("throws E_PHOTON_HYDRATION_BAD_DATA when the JSON is malformed", async () => {
 		setRawPhotonData("{not-json}");
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_BAD_DATA",
+			code: "E_PHOTON_HYDRATION_BAD_DATA",
 		});
 	});
 
-	it("throws PHOTON_HYDRATION_BAD_DATA when framework field is missing", async () => {
+	it("throws E_PHOTON_HYDRATION_BAD_DATA when framework field is missing", async () => {
 		setRawPhotonData(
 			JSON.stringify({ component: "Home", props: {}, url: "/" }),
 		);
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_BAD_DATA",
+			code: "E_PHOTON_HYDRATION_BAD_DATA",
 		});
 	});
 
-	it("throws PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK on unknown framework value", async () => {
+	it("throws E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK on unknown framework value", async () => {
 		setRawPhotonData(
 			JSON.stringify({
 				component: "Home",
@@ -161,20 +161,20 @@ describe("photon/client > hydrate — error paths", () => {
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
+			code: "E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
 		});
 	});
 
-	it("throws PHOTON_HYDRATION_BAD_DATA when framework is non-string (number)", async () => {
+	it("throws E_PHOTON_HYDRATION_BAD_DATA when framework is non-string (number)", async () => {
 		setRawPhotonData(
 			JSON.stringify({ component: "Home", props: {}, url: "/", framework: 42 }),
 		);
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
-		).rejects.toMatchObject({ code: "PHOTON_HYDRATION_BAD_DATA" });
+		).rejects.toMatchObject({ code: "E_PHOTON_HYDRATION_BAD_DATA" });
 	});
 
-	it("throws PHOTON_HYDRATION_BAD_DATA when component is empty string", async () => {
+	it("throws E_PHOTON_HYDRATION_BAD_DATA when component is empty string", async () => {
 		setRawPhotonData(
 			JSON.stringify({
 				component: "",
@@ -186,11 +186,11 @@ describe("photon/client > hydrate — error paths", () => {
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_BAD_DATA",
+			code: "E_PHOTON_HYDRATION_BAD_DATA",
 		});
 	});
 
-	it("throws PHOTON_HYDRATION_BAD_DATA when props is an array", async () => {
+	it("throws E_PHOTON_HYDRATION_BAD_DATA when props is an array", async () => {
 		setRawPhotonData(
 			JSON.stringify({
 				component: "Home",
@@ -202,11 +202,11 @@ describe("photon/client > hydrate — error paths", () => {
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_BAD_DATA",
+			code: "E_PHOTON_HYDRATION_BAD_DATA",
 		});
 	});
 
-	it("throws PHOTON_HYDRATION_BAD_DATA when props is null", async () => {
+	it("throws E_PHOTON_HYDRATION_BAD_DATA when props is null", async () => {
 		setRawPhotonData(
 			JSON.stringify({
 				component: "Home",
@@ -218,16 +218,16 @@ describe("photon/client > hydrate — error paths", () => {
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_BAD_DATA",
+			code: "E_PHOTON_HYDRATION_BAD_DATA",
 		});
 	});
 
-	it("throws PHOTON_HYDRATION_NO_TARGET when #app is missing", async () => {
+	it("throws E_PHOTON_HYDRATION_NO_TARGET when #app is missing", async () => {
 		setupDom({}, false);
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({
-			code: "PHOTON_HYDRATION_NO_TARGET",
+			code: "E_PHOTON_HYDRATION_NO_TARGET",
 		});
 	});
 
@@ -295,10 +295,10 @@ describe("photon/client > hydrate — error paths", () => {
 	});
 
 	it("PhotonClientError exposes a code and an instanceof Error chain", () => {
-		const err = new PhotonClientError("PHOTON_HYDRATION_BAD_DATA", "msg", {
+		const err = new PhotonClientError("E_PHOTON_HYDRATION_BAD_DATA", "msg", {
 			hint: "h",
 		});
-		expect(err.code).toBe("PHOTON_HYDRATION_BAD_DATA");
+		expect(err.code).toBe("E_PHOTON_HYDRATION_BAD_DATA");
 		expect(err.hint).toBe("h");
 		expect(err.name).toBe("PhotonClientError");
 		expect(err instanceof Error).toBe(true);

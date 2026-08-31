@@ -150,7 +150,7 @@ function readPageData(): PhotonPageData {
 			: null;
 	if (!el) {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_NO_DATA",
+			"E_PHOTON_HYDRATION_NO_DATA",
 			`Missing <script id="${PHOTON_DATA_ELEMENT_ID}"> in the document.`,
 			{
 				hint: "Render the page through PhotonRenderer.render() — the script block is emitted automatically.",
@@ -164,7 +164,7 @@ function readPageData(): PhotonPageData {
 		parsed = JSON.parse(raw);
 	} catch (err) {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"Failed to JSON.parse the photon-data block.",
 			{
 				hint: "The script block must contain valid JSON. Check for double-escaping or HTML mangling.",
@@ -179,7 +179,7 @@ function readPageData(): PhotonPageData {
 function validatePageData(value: unknown): PhotonPageData {
 	if (!isPlainObject(value)) {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"photon-data must be a JSON object.",
 			{
 				hint: "Expected { component, props, url, framework } — got non-object.",
@@ -191,25 +191,25 @@ function validatePageData(value: unknown): PhotonPageData {
 
 	if (typeof component !== "string" || component.length === 0) {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"photon-data.component must be a non-empty string.",
 		);
 	}
 	if (!isPlainObject(props)) {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"photon-data.props must be an object.",
 		);
 	}
 	if (typeof url !== "string") {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"photon-data.url must be a string.",
 		);
 	}
 	if (typeof framework !== "string") {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"photon-data.framework must be a string.",
 			{ hint: `Got: ${typeof framework}.` },
 		);
@@ -219,7 +219,7 @@ function validatePageData(value: unknown): PhotonPageData {
 		// so consumers can distinguish "malformed payload" (BAD_DATA) from
 		// "well-formed but framework not bundled" (UNSUPPORTED_FRAMEWORK).
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
+			"E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
 			`Unsupported framework: '${framework}'.`,
 			{ hint: `Supported: ${SUPPORTED_FRAMEWORKS.join(", ")}.` },
 		);
@@ -245,7 +245,7 @@ function resolveTarget(selector: string): Element {
 		typeof document !== "undefined" ? document.querySelector(selector) : null;
 	if (!target) {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_NO_TARGET",
+			"E_PHOTON_HYDRATION_NO_TARGET",
 			`No DOM node matched the hydrate target selector ${selector}.`,
 			{
 				hint: 'PhotonRenderer emits <div id="app">…</div> by default. Override via hydrate({ target }).',
@@ -258,7 +258,7 @@ function resolveTarget(selector: string): Element {
 async function loadAdapter(framework: ClientFramework): Promise<PhotonAdapter> {
 	if (!SUPPORTED_FRAMEWORKS.includes(framework)) {
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
+			"E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
 			`Unsupported framework: ${framework}.`,
 			{ hint: `Supported: ${SUPPORTED_FRAMEWORKS.join(", ")}.` },
 		);
@@ -282,7 +282,7 @@ async function loadAdapter(framework: ClientFramework): Promise<PhotonAdapter> {
 	} catch (err) {
 		if (err instanceof PhotonClientError) throw err;
 		throw new PhotonClientError(
-			"PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
+			"E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
 			`Failed to load the ${framework} adapter.`,
 			{
 				hint: `Install the framework's runtime as a dependency: pnpm add ${frameworkInstallSpec(framework)}.`,

@@ -10,11 +10,11 @@
  */
 
 export type PhotonClientErrorCode =
-	| "PHOTON_HYDRATION_NO_DATA"
-	| "PHOTON_HYDRATION_BAD_DATA"
-	| "PHOTON_HYDRATION_NO_TARGET"
-	| "PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK"
-	| "PHOTON_HYDRATION_ADAPTER_LOAD_FAILED";
+	| "E_PHOTON_HYDRATION_NO_DATA"
+	| "E_PHOTON_HYDRATION_BAD_DATA"
+	| "E_PHOTON_HYDRATION_NO_TARGET"
+	| "E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK"
+	| "E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED";
 
 /**
  * Base URL for the Photon error catalog. See the JSDoc on `PHOTON_DOCS_BASE_URL`
@@ -25,7 +25,9 @@ export type PhotonClientErrorCode =
 export const PHOTON_DOCS_BASE_URL = "https://ream.dev";
 
 function codeToAnchor(code: PhotonClientErrorCode): string {
-	return code.toLowerCase().replace(/_/g, "-");
+	// Kept in step with the server copy in `../errors.ts`: the `E_` prefix
+	// belongs to the code, not to the catalog heading it links to.
+	return code.replace(/^E_/, "").toLowerCase().replace(/_/g, "-");
 }
 
 function serializeCause(cause: unknown, depth = 0): unknown {

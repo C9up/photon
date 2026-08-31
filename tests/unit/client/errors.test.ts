@@ -6,7 +6,7 @@ import {
 
 describe("PhotonClientError", () => {
 	it("computes docsUrl from the lowercased, hyphen-separated code", () => {
-		const err = new PhotonClientError("PHOTON_HYDRATION_NO_DATA", "boom");
+		const err = new PhotonClientError("E_PHOTON_HYDRATION_NO_DATA", "boom");
 		expect(err.docsUrl).toBe(
 			`${PHOTON_DOCS_BASE_URL}/errors/#photon-hydration-no-data`,
 		);
@@ -14,7 +14,7 @@ describe("PhotonClientError", () => {
 
 	it("preserves a context payload as a readonly property", () => {
 		const err = new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"malformed",
 			{ context: { selector: "#app", rawLength: 0 } },
 		);
@@ -24,7 +24,7 @@ describe("PhotonClientError", () => {
 	it("forwards `cause` to Error so devtools chains the underlying error", () => {
 		const inner = new SyntaxError("Unexpected token");
 		const err = new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"JSON parse failed",
 			{ cause: inner },
 		);
@@ -33,14 +33,14 @@ describe("PhotonClientError", () => {
 
 	it("emits name + code + message + docsUrl through JSON.stringify (log-shipping contract)", () => {
 		const err = new PhotonClientError(
-			"PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
+			"E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
 			"adapter boom",
 			{ hint: "install react-dom" },
 		);
 		const serialized: unknown = JSON.parse(JSON.stringify(err));
 		expect(serialized).toMatchObject({
 			name: "PhotonClientError",
-			code: "PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
+			code: "E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
 			message: "adapter boom",
 			docsUrl: `${PHOTON_DOCS_BASE_URL}/errors/#photon-hydration-adapter-load-failed`,
 			hint: "install react-dom",
@@ -50,13 +50,13 @@ describe("PhotonClientError", () => {
 	it("walks the cause chain when toJSON() runs", () => {
 		const inner = new SyntaxError("Unexpected token <");
 		const err = new PhotonClientError(
-			"PHOTON_HYDRATION_BAD_DATA",
+			"E_PHOTON_HYDRATION_BAD_DATA",
 			"JSON parse failed",
 			{ cause: inner },
 		);
 		const serialized: unknown = JSON.parse(JSON.stringify(err));
 		expect(serialized).toMatchObject({
-			code: "PHOTON_HYDRATION_BAD_DATA",
+			code: "E_PHOTON_HYDRATION_BAD_DATA",
 			message: "JSON parse failed",
 			cause: { name: "SyntaxError", message: "Unexpected token <" },
 		});

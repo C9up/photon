@@ -205,7 +205,7 @@ describe("photon > PhotonRenderer > boot() validation", () => {
 		else process.env.NODE_ENV = orig;
 	});
 
-	it("rejects buildDir that escapes the project root via INVALID_CONFIG", async () => {
+	it("rejects buildDir that escapes the project root via E_INVALID_CONFIG", async () => {
 		const r = new PhotonRenderer({
 			...baseConfig,
 			buildDir: "../escape",
@@ -221,7 +221,7 @@ describe("photon > PhotonRenderer > boot() validation", () => {
 		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
 	});
 
-	it("rejects entryClient with disallowed characters via INVALID_CONFIG", async () => {
+	it("rejects entryClient with disallowed characters via E_INVALID_CONFIG", async () => {
 		const r = new PhotonRenderer({
 			...baseConfig,
 			entryClient: "evil!@#$.tsx",

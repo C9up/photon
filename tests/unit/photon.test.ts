@@ -261,8 +261,8 @@ describe("photon > PhotonMiddleware", () => {
 
 describe("photon > PhotonError", () => {
 	it("stores the fully prefixed code verbatim and sets name + message", () => {
-		const err = new PhotonError("PHOTON_SSR_LOAD_FAILED", "Render failed");
-		expect(err.code).toBe("PHOTON_SSR_LOAD_FAILED");
+		const err = new PhotonError("E_PHOTON_SSR_LOAD_FAILED", "Render failed");
+		expect(err.code).toBe("E_PHOTON_SSR_LOAD_FAILED");
 		expect(err.name).toBe("PhotonError");
 		expect(err.message).toBe("Render failed");
 	});

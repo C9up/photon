@@ -36,7 +36,7 @@ export const svelteAdapter: PhotonAdapter = {
 			typeof svelte.hydrate !== "function" ||
 			typeof svelte.unmount !== "function"
 		) {
-			// Surfaces as PHOTON_HYDRATION_ADAPTER_LOAD_FAILED in the caller.
+			// Surfaces as E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED in the caller.
 			throw new Error(
 				"svelte module is missing `hydrate` or `unmount`. Photon's Svelte adapter requires Svelte 5+.",
 			);
