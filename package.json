@@ -63,7 +63,7 @@
     "@types/node": "^22.19.15",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "react": "^19",
     "react-dom": "^19",
     "reflect-metadata": "^0.2.2",
