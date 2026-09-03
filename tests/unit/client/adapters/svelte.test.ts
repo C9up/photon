@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+
 /** Narrow away null without a `!` non-null assertion (which lies to the compiler). */
 function defined<T>(value: T | null | undefined): T {
 	if (value == null) throw new Error("expected a defined value (#app element)");
@@ -40,7 +41,7 @@ describe("photon/client/adapters/svelte", () => {
 		await svelteAdapter.hydrate(target, "PageSvelte", { color: "red" });
 
 		expect(hydrateFn).toHaveBeenCalledTimes(1);
-		const call = hydrateFn.mock.calls[0];
+		const call = defined(hydrateFn.mock.calls[0]);
 		expect(call[0]).toBe("PageSvelte");
 		expect(call[1].target).toBe(target);
 		expect(call[1].props).toEqual({ color: "red" });
@@ -69,7 +70,7 @@ describe("photon/client/adapters/svelte", () => {
 
 		expect(unmountFn).toHaveBeenCalledWith({ id: "a" });
 		expect(mountFn).toHaveBeenCalledTimes(1);
-		const mountCall = mountFn.mock.calls[0];
+		const mountCall = defined(mountFn.mock.calls[0]);
 		expect(mountCall[0]).toBe("B");
 		expect(mountCall[1].props).toEqual({ v: 2 });
 	});

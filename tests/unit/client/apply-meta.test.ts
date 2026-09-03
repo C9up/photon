@@ -12,6 +12,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyMetaToDom } from "../../../src/client/applyMeta.js";
 import type { MetaTags } from "../../../src/seo/Meta.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
+
+
 const OWNED_ATTR = "data-photon-meta";
 
 describe("photon > applyMetaToDom", () => {
@@ -145,10 +154,10 @@ describe("photon > applyMetaToDom", () => {
 			document.head.querySelectorAll(`meta[${OWNED_ATTR}]`),
 		);
 		expect(customs).toHaveLength(4);
-		expect(customs[0].getAttribute("name")).toBe("theme-color");
-		expect(customs[1].getAttribute("property")).toBe("fb:app_id");
-		expect(customs[2].getAttribute("http-equiv")).toBe("refresh");
-		expect(customs[3].getAttribute("charset")).toBe("utf-8");
+		expect(defined(customs[0]).getAttribute("name")).toBe("theme-color");
+		expect(defined(customs[1]).getAttribute("property")).toBe("fb:app_id");
+		expect(defined(customs[2]).getAttribute("http-equiv")).toBe("refresh");
+		expect(defined(customs[3]).getAttribute("charset")).toBe("utf-8");
 	});
 
 	it("is idempotent — re-applying the same payload converges on the same DOM", () => {

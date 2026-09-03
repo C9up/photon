@@ -4,6 +4,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
+
+
 	always,
 	deepMerge,
 	defer,
@@ -13,6 +15,13 @@ import {
 	resolveProps,
 	scroll,
 } from "../../src/props.js";
+
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
 
 describe("photon > props", () => {
 	it("sends every prop on a normal visit", async () => {
@@ -317,7 +326,7 @@ describe("photon > once", () => {
 			"F",
 			{ only: [], except: [], now: 5_000 },
 		);
-		expect(out.extras.onceProps?.rates.expiresAt).toBe(5_000 + 3_600_000);
+		expect(defined(out.extras.onceProps?.rates).expiresAt).toBe(5_000 + 3_600_000);
 	});
 
 	it("reads every duration unit, and a bare number as milliseconds", async () => {
@@ -327,7 +336,7 @@ describe("photon > once", () => {
 				except: [],
 				now: 0,
 			});
-			return out.extras.onceProps?.v.expiresAt ?? null;
+			return defined(out.extras.onceProps?.v).expiresAt ?? null;
 		};
 		expect(await at(250)).toBe(250);
 		expect(await at("250ms")).toBe(250);
@@ -350,7 +359,7 @@ describe("photon > once", () => {
 			"F",
 			{ only: [], except: [], now: 0 },
 		);
-		expect(out.extras.onceProps?.v.expiresAt).toBe(9_000);
+		expect(defined(out.extras.onceProps?.v).expiresAt).toBe(9_000);
 	});
 
 	it("composes with defer: cached terms stated, value announced", async () => {
@@ -422,14 +431,14 @@ describe("photon > scroll", () => {
 
 	it("stops offering a next page on the last one", async () => {
 		const out = await resolveProps({ u: scroll(paginator(5, 5, [])) }, "U");
-		expect(out.extras.scrollProps?.u.nextPage).toBeNull();
-		expect(out.extras.scrollProps?.u.previousPage).toBe(4);
+		expect(defined(out.extras.scrollProps?.u).nextPage).toBeNull();
+		expect(defined(out.extras.scrollProps?.u).previousPage).toBe(4);
 	});
 
 	it("has no previous page on the first one", async () => {
 		const out = await resolveProps({ u: scroll(paginator(1, 3, [])) }, "U");
-		expect(out.extras.scrollProps?.u.previousPage).toBeNull();
-		expect(out.extras.scrollProps?.u.nextPage).toBe(2);
+		expect(defined(out.extras.scrollProps?.u).previousPage).toBeNull();
+		expect(defined(out.extras.scrollProps?.u).nextPage).toBe(2);
 	});
 
 	it("keys the merge on a field so overlapping pages do not duplicate rows", async () => {
@@ -457,7 +466,7 @@ describe("photon > scroll", () => {
 			reset: ["u"],
 		});
 		expect(out.extras.mergeProps).toBeUndefined();
-		expect(out.extras.scrollProps?.u.reset).toBe(true);
+		expect(defined(out.extras.scrollProps?.u).reset).toBe(true);
 		// The value still travels — a reset replaces the list, it does not empty it.
 		expect(out.props.u).toEqual({
 			data: [1],
@@ -482,7 +491,7 @@ describe("photon > scroll", () => {
 			"U",
 			{ only: ["u"], except: [], component: "U" },
 		);
-		expect(out.extras.scrollProps?.u.currentPage).toBe(1);
+		expect(defined(out.extras.scrollProps?.u).currentPage).toBe(1);
 		expect(out.extras.deferredProps).toBeUndefined();
 	});
 
@@ -498,7 +507,7 @@ describe("photon > scroll", () => {
 			},
 			"F",
 		);
-		expect(out.extras.scrollProps?.feed.nextPage).toBe("abc");
+		expect(defined(out.extras.scrollProps?.feed).nextPage).toBe("abc");
 	});
 
 	it("refuses to guess a cursor it cannot derive", async () => {

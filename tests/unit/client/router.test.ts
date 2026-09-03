@@ -14,6 +14,15 @@ import {
 import { hydrate } from "../../../src/client/hydrate.js";
 import type { ResolveComponent } from "../../../src/client/router.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
+
+
 interface RouterTestState {
 	reactHydrate: Mock<(target: Element, node: unknown) => void>;
 	reactRender: Mock<() => void>;
@@ -138,9 +147,16 @@ describe("photon/client > router — interception", () => {
 
 		expect(event.defaultPrevented).toBe(true);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
-		const [url, init] = fetchMock.mock.calls[0];
+		const [url, init] = defined(fetchMock.mock.calls[0]);
 		expect(url).toBe("/orders");
-		expect((init.headers as Record<string, string>)["x-photon"]).toBe("true");
+		const headers = init.headers;
+		expect(
+			headers instanceof Headers
+				? headers.get("x-photon")
+				: Array.isArray(headers)
+					? headers.find(([name]) => name === "x-photon")?.[1]
+					: headers?.["x-photon"],
+		).toBe("true");
 		expect(init.credentials).toBe("same-origin");
 
 		expect(state.resolveComponent).toHaveBeenCalledWith("Orders");
