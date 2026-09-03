@@ -4,8 +4,6 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
-
-
 	always,
 	deepMerge,
 	defer,
@@ -21,7 +19,6 @@ function defined<T>(value: T | null | undefined): T {
 	if (value == null) throw new Error("expected a defined value");
 	return value;
 }
-
 
 describe("photon > props", () => {
 	it("sends every prop on a normal visit", async () => {
@@ -326,7 +323,9 @@ describe("photon > once", () => {
 			"F",
 			{ only: [], except: [], now: 5_000 },
 		);
-		expect(defined(out.extras.onceProps?.rates).expiresAt).toBe(5_000 + 3_600_000);
+		expect(defined(out.extras.onceProps?.rates).expiresAt).toBe(
+			5_000 + 3_600_000,
+		);
 	});
 
 	it("reads every duration unit, and a bare number as milliseconds", async () => {

@@ -20,9 +20,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
-
-
 interface RouterTestState {
 	reactHydrate: Mock<(target: Element, node: unknown) => void>;
 	reactRender: Mock<() => void>;

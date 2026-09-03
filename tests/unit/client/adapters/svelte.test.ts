@@ -4,7 +4,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-
 /** Narrow away null without a `!` non-null assertion (which lies to the compiler). */
 function defined<T>(value: T | null | undefined): T {
 	if (value == null) throw new Error("expected a defined value (#app element)");
