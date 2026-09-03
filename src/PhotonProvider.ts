@@ -1,3 +1,4 @@
+import "./augmentations.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
 

@@ -4,6 +4,8 @@
  * @implements FR89, FR90, FR91, FR92, FR93
  */
 
+import "./augmentations.js";
+
 export { defineConfig } from "./config.js";
 export { configure } from "./configure.js";
 export { PhotonError } from "./errors.js";
