@@ -138,6 +138,7 @@ describe("photon > PhotonRenderer > render() with an SSR module", () => {
 		// so the previous `as unknown as { ssrModule }` override could not reach
 		// it — and never should have. `useSsrModule` is what `boot()` does after
 		// loading the module from the build output.
+		// biome-ignore lint/correctness/useHookAtTopLevel: a renderer method, not a React hook
 		r.useSsrModule({ render });
 	}
 

@@ -36,6 +36,10 @@ jobs:
           node-version: '22'
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm exec tsc -p tsconfig.build.json --noEmit
+      # And the tests: `tsconfig.build.json` leaves them out, so every type a
+      # test relies on went ungated until this step ran the project's own
+      # `tsconfig.json`, which includes them.
+      - run: pnpm typecheck
       - run: pnpm lint
   # photon is a pure-TS leaf: zero @c9up runtime deps, builds and tests
   # standalone (no native crate, no cross-compile matrix, no sibling
@@ -56,7 +60,7 @@ jobs:
       - name: Build (tsc)
         run: pnpm build
       - name: Vitest
-        run: pnpm exec vitest run
+        run: pnpm exec vitest run --coverage
 
   # Publish job — gated on workflow_dispatch (manual maintainer trigger) AND
   # a green build-and-test. Requires NPM_TOKEN secret + a v<MAJOR>.<MINOR>.<PATCH>

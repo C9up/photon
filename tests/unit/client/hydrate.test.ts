@@ -14,10 +14,10 @@ interface PageDataInit {
 
 function setupDom(opts: PageDataInit = {}, includeTarget = true): void {
 	const data: Record<string, unknown> = {};
-	if (opts.component !== null) data["component"] = opts.component ?? "Home";
-	if (opts.props !== null) data["props"] = opts.props ?? { greeting: "hi" };
-	if (opts.url !== null) data["url"] = opts.url ?? "/";
-	if (opts.framework !== null) data["framework"] = opts.framework ?? "react";
+	if (opts.component !== null) data.component = opts.component ?? "Home";
+	if (opts.props !== null) data.props = opts.props ?? { greeting: "hi" };
+	if (opts.url !== null) data.url = opts.url ?? "/";
+	if (opts.framework !== null) data.framework = opts.framework ?? "react";
 
 	document.documentElement.innerHTML = `
     ${includeTarget ? '<div id="app">SSR</div>' : ""}
@@ -35,7 +35,7 @@ function setRawPhotonData(rawText: string): void {
 beforeEach(() => {
 	document.documentElement.innerHTML = "";
 	// Reset router-installed flag (set on documentElement.dataset).
-	delete document.documentElement.dataset["photonRouterInstalled"];
+	delete document.documentElement.dataset.photonRouterInstalled;
 });
 
 afterEach(() => {

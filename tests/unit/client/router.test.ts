@@ -73,7 +73,7 @@ function createAnchor(opts: {
 	a.setAttribute("href", opts.href);
 	if (opts.target) a.setAttribute("target", opts.target);
 	if (opts.download) a.setAttribute("download", "");
-	if (opts.dataPhoton) a.dataset["photon"] = opts.dataPhoton;
+	if (opts.dataPhoton) a.dataset.photon = opts.dataPhoton;
 	document.body.appendChild(a);
 	return a;
 }
@@ -103,7 +103,7 @@ function dispatchClick(
 
 beforeEach(() => {
 	document.documentElement.innerHTML = "";
-	delete document.documentElement.dataset["photonRouterInstalled"];
+	delete document.documentElement.dataset.photonRouterInstalled;
 	vi.unstubAllGlobals();
 });
 

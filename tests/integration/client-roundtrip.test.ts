@@ -130,6 +130,6 @@ describe("photon/client > integration roundtrip", () => {
 		const { hydrate } = await import("../../src/client/hydrate.js");
 		await hydrate({ resolveComponent: async () => ({ default: {} }) });
 
-		expect(captured?.["html"]).toBe(dangerous);
+		expect(captured?.html).toBe(dangerous);
 	});
 });

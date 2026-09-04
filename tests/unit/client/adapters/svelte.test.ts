@@ -80,9 +80,7 @@ describe("photon/client/adapters/svelte", () => {
 		// exports. vitest 4's mock validator requires the keys to be present, so
 		// we declare them with realistic falsy types (functions in `default`,
 		// undefined for the v5-only exports the adapter probes).
-		class FakeSvelte4Component {
-			constructor(_opts: unknown) {}
-		}
+		class FakeSvelte4Component {}
 		vi.doMock("svelte", () => ({
 			default: FakeSvelte4Component,
 			hydrate: undefined,
