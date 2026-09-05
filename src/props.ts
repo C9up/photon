@@ -565,7 +565,7 @@ export async function resolveProps(
 	 * Put a value in the payload.
 	 *
 	 * A bare callback is a lazy prop, invoked on every render — a controller
-	 * writes `{ total: () => Order.count() }` and expects the number, not the
+	 * writes `{ total: () => countOrders() }` and expects the number, not the
 	 * function. A promise is awaited for the same reason.
 	 */
 	const emit = async (key: string, value: unknown): Promise<void> => {
