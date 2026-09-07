@@ -14,6 +14,19 @@ interface PhotonConfigStore {
 export interface PhotonAppContext {
 	container: PhotonContainer;
 	config: PhotonConfigStore;
+	/**
+	 * Resolve a path against the application root (AdonisJS `app.makePath`).
+	 *
+	 * `public/build` means "under the application root", not "under whatever
+	 * directory the process started in". Without this the manifest and the SSR
+	 * entry were looked up relative to `process.cwd()`, so an application
+	 * started by systemd or from the root of a monorepo found neither — and
+	 * served an unhydrated shell instead of reporting it.
+	 *
+	 * Optional, because photon is agnostic: a host with no notion of an
+	 * application root leaves the lookup cwd-relative, as before.
+	 */
+	makePath?(...segments: string[]): string;
 }
 
 export default class PhotonProvider {
@@ -24,7 +37,14 @@ export default class PhotonProvider {
 			const config = this.app.config.get<PhotonConfig>("photon");
 			if (!config)
 				throw new Error("Photon config not found — create config/photon.ts");
-			return new PhotonRenderer(config);
+			// The host knows where the application lives; the renderer should not
+			// have to guess from the working directory. An explicit `appRoot` in
+			// the config still wins — a deployment that lays the build out
+			// elsewhere said so on purpose.
+			const appRoot = config.appRoot ?? this.app.makePath?.();
+			return new PhotonRenderer(
+				appRoot === undefined ? config : { ...config, appRoot },
+			);
 		});
 
 		this.app.container.singleton("photon", async () => {

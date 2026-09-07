@@ -1,7 +1,7 @@
 {
   "name": "@c9up/photon",
-  "version": "0.1.16",
-  "description": "Photon \u2014 Frontend rendering engine for the Ream framework",
+  "version": "0.1.17",
+  "description": "Photon — Frontend rendering engine for the Ream framework",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",

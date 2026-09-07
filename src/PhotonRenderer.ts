@@ -63,6 +63,19 @@ export interface PhotonConfig {
 	defaultMeta?: MetaTags;
 	/** Which pages to server-render. Every page, unless narrowed here. */
 	ssr?: SsrConfig;
+	/**
+	 * The application root, against which {@link buildDir} is resolved.
+	 *
+	 * Without it the build was looked up under `process.cwd()`, so an
+	 * application started by systemd, from the root of a monorepo, or from
+	 * anywhere but its own directory searched the wrong place — and then served
+	 * an unhydrated shell rather than saying so. The provider supplies it from
+	 * `app.makePath`, the way bay already does.
+	 *
+	 * Optional, because photon is agnostic: a host with no notion of an
+	 * application root falls back to the working directory, as before.
+	 */
+	appRoot?: string;
 }
 
 /**
@@ -169,7 +182,9 @@ export class PhotonRenderer {
 
 		// Production: load the built SSR module and manifest
 		try {
-			const projectRoot = path.resolve(process.cwd());
+			// The application's own root, not the directory the process happens
+			// to have started in.
+			const projectRoot = path.resolve(this.#config.appRoot ?? process.cwd());
 			const buildDir = this.#config.buildDir ?? "public/build";
 			// Validate buildDir is within project root. `path.resolve` already
 			// normalises `..` segments, but a buildDir that *equals* the project
