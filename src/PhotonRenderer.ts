@@ -144,6 +144,7 @@ export class PhotonRenderer {
 	#cachedVersion?: string;
 	#isDev: boolean;
 	#viteOrigin?: string;
+	#devServer?: ViteDevServerLike;
 
 	/**
 	 * Install a server-rendering module directly, instead of loading one from
@@ -159,6 +160,19 @@ export class PhotonRenderer {
 		return this;
 	}
 
+	/**
+	 * Install the dev SSR compiler directly, instead of starting Vite.
+	 *
+	 * The same seam as {@link useSsrModule}, one layer down: a test wants the
+	 * reload-per-render behaviour without a real Vite instance and a real
+	 * project on disk, and a host that already runs Vite hands over the one it
+	 * has rather than paying for a second module graph.
+	 */
+	useDevServer(server: ViteDevServerLike): this {
+		this.#devServer = server;
+		return this;
+	}
+
 	constructor(config: PhotonConfig) {
 		this.#config = config;
 		this.#isDev = process.env.NODE_ENV !== "production";
@@ -170,13 +184,100 @@ export class PhotonRenderer {
 	}
 
 	/**
+	 * Wire server rendering in development.
+	 *
+	 * Production loads a BUILT bundle once; there is none in dev, and loading
+	 * the source through Node would skip every transform the framework plugins
+	 * apply (JSX, `.vue`, `.svelte`). Vite's own SSR loader is what applies
+	 * them, so this starts one in middleware mode — it serves nothing itself,
+	 * it only compiles.
+	 *
+	 * The module is fetched on EVERY render rather than cached: an edit to a
+	 * page component has to show up without restarting the process, which is
+	 * the whole reason dev differs from production here.
+	 *
+	 * Vite is an optional peer. Without it installed this returns quietly and
+	 * `render()` emits the client-only shell, which is what dev did before —
+	 * an app that never wanted server rendering in dev keeps working, and one
+	 * that does installs the dependency it was always going to need.
+	 */
+	async #bootDev(): Promise<void> {
+		if (this.#devServer === undefined) {
+			// No SSR entry on disk means this project does not server-render, and
+			// starting a compiler for it would cost a module graph and a watcher
+			// to produce nothing. Absence is the feature being off; a PRESENT
+			// entry that fails to compile is an error worth hearing about, and
+			// stays one.
+			if (!(await this.#hasSsrEntry())) return;
+			const vite = await loadVite();
+			if (vite === undefined) return;
+			try {
+				this.#devServer = await vite.createServer({
+					root: path.resolve(this.#config.appRoot ?? process.cwd()),
+					// `custom` keeps Vite from installing its own SPA fallback: the
+					// application owns routing, Vite is here to compile.
+					appType: "custom",
+					server: { middlewareMode: true },
+				});
+			} catch (err) {
+				// A broken vite.config is the app's problem to fix, but it must not
+				// take the dev server down with it — say so and fall back to the
+				// client-only shell.
+				console.warn(
+					`[photon] could not start the dev SSR compiler — rendering client-only. ${err instanceof Error ? err.message : String(err)}`,
+				);
+				return;
+			}
+		}
+		const server = this.#devServer;
+		this.#ssrModule = {
+			render: async (page: PageProps): Promise<string> => {
+				const loaded = await server.ssrLoadModule(
+					`/${this.#config.entryServer.replace(/^\/+/, "")}`,
+				);
+				const render = pickRender(loaded);
+				if (render === undefined) {
+					throw new PhotonError(
+						"E_PHOTON_SSR_LOAD_FAILED",
+						`${this.#config.entryServer} does not export a render() function`,
+						{ hint: "Export `render(page)` from the SSR entry point." },
+					);
+				}
+				return render(page);
+			},
+		};
+	}
+
+	/** Whether the configured SSR entry point exists under the project root. */
+	async #hasSsrEntry(): Promise<boolean> {
+		const root = path.resolve(this.#config.appRoot ?? process.cwd());
+		try {
+			await access(path.join(root, this.#config.entryServer));
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Release the dev SSR compiler.
+	 *
+	 * It holds a watcher and a module graph; leaving it running keeps the
+	 * process alive after a shutdown signal, and leaks one per instance in a
+	 * test file.
+	 */
+	async close(): Promise<void> {
+		const server = this.#devServer;
+		this.#devServer = undefined;
+		if (server !== undefined) await server.close();
+	}
+
+	/**
 	 * Initialize the renderer — load SSR module and manifest.
 	 */
 	async boot(): Promise<void> {
 		if (this.#isDev) {
-			// Dev mode: SSR is NOT wired yet — there is no Vite ssrLoadModule /
-			// dev-server proxy implemented. boot() returns early, so render() emits
-			// an empty `<div id="app">` shell that the client hydrates (audit 2026-06-13).
+			await this.#bootDev();
 			return;
 		}
 
@@ -729,4 +830,64 @@ function collectManifestAssets(
 
 	visit(entryClient);
 	return [...new Set(out)];
+}
+
+/** The slice of Vite's dev server this needs, so a fake can stand in for it. */
+export interface ViteDevServerLike {
+	ssrLoadModule(url: string): Promise<Record<string, unknown>>;
+	close(): Promise<void>;
+}
+
+/** The slice of Vite's module entry point this needs. */
+interface ViteLike {
+	createServer(options: {
+		root: string;
+		appType: "custom";
+		server: { middlewareMode: true };
+	}): Promise<ViteDevServerLike>;
+}
+
+/**
+ * Import Vite, or answer `undefined` when it is not installed.
+ *
+ * The specifier is built rather than written literally so a bundler treats it
+ * as external instead of trying to follow an optional peer into the graph.
+ */
+async function loadVite(): Promise<ViteLike | undefined> {
+	try {
+		const mod: unknown = await import(/* @vite-ignore */ "vite");
+		return isViteLike(mod) ? mod : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function isViteLike(value: unknown): value is ViteLike {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"createServer" in value &&
+		typeof value.createServer === "function"
+	);
+}
+
+/** The `render` export, wherever the entry point put it. */
+function pickRender(
+	loaded: Record<string, unknown>,
+): ((page: PageProps) => Promise<string> | string) | undefined {
+	if (typeof loaded.render === "function") {
+		const render = loaded.render;
+		return (page) => render(page);
+	}
+	const fallback = loaded.default;
+	if (
+		typeof fallback === "object" &&
+		fallback !== null &&
+		"render" in fallback &&
+		typeof fallback.render === "function"
+	) {
+		const render = fallback.render;
+		return (page) => render(page);
+	}
+	return undefined;
 }
