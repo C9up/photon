@@ -25,9 +25,34 @@ const base: PhotonConfig = {
 	entryServer: "resources/ssr.tsx",
 };
 
+/** A context shaped like the one the middleware serves a request on. */
+function requestContext(
+	headers: Record<string, string> = {},
+	path = "/",
+): PhotonMiddlewareContext {
+	const ctx: PhotonMiddlewareContext = {
+		request: {
+			method: () => "GET",
+			path: () => path,
+			header: (name) => headers[name],
+		},
+		response: {
+			status() {
+				return ctx.response;
+			},
+			header() {
+				return ctx.response;
+			},
+			send() {},
+			getHeader: () => undefined,
+		},
+	};
+	return ctx;
+}
+
 describe("photon > ssr.pages receives the request", () => {
 	it("hands the predicate the context the middleware is serving", async () => {
-		let seen: SsrRequestContext;
+		let seen: SsrRequestContext | undefined;
 		const renderer = new PhotonRenderer({
 			...base,
 			ssr: {
@@ -37,48 +62,75 @@ describe("photon > ssr.pages receives the request", () => {
 				},
 			},
 		});
-		const httpCtx = { request: { header: () => "yes" } };
-		const context = createPhotonContext(renderer, "/dashboard", httpCtx);
-
-		await context.ssrEnabled("Dashboard");
+		const httpCtx = requestContext();
+		await createPhotonContext(renderer, "/dashboard", httpCtx).ssrEnabled(
+			"Dashboard",
+		);
 		expect(seen).toBe(httpCtx);
 	});
 
-	it("lets the decision turn on the request", async () => {
+	it("lets the decision turn on the request, with no assertion needed", async () => {
 		const renderer = new PhotonRenderer({
 			...base,
 			ssr: {
+				// Reads straight off the context — that it typechecks IS the point.
 				pages: (_component, ctx) =>
-					typeof ctx === "object" &&
-					ctx !== null &&
-					"crawler" in ctx &&
-					ctx.crawler === true,
+					/bot|crawler/i.test(ctx?.request?.header("user-agent") ?? ""),
 			},
 		});
 
-		const forCrawler = createPhotonContext(renderer, "/p", { crawler: true });
-		const forBrowser = createPhotonContext(renderer, "/p", { crawler: false });
+		const crawler = requestContext({ "user-agent": "Googlebot/2.1" });
+		const browser = requestContext({ "user-agent": "Mozilla/5.0" });
 		// The same component, two answers — which is the whole point.
-		expect(await forCrawler.ssrEnabled("Post")).toBe(true);
-		expect(await forBrowser.ssrEnabled("Post")).toBe(false);
+		expect(
+			await createPhotonContext(renderer, "/p", crawler).ssrEnabled("Post"),
+		).toBe(true);
+		expect(
+			await createPhotonContext(renderer, "/p", browser).ssrEnabled("Post"),
+		).toBe(false);
 	});
 
-	it("keeps the renderer a singleton — nothing is stored on it", async () => {
-		const seen: unknown[] = [];
+	/**
+	 * Overlapping requests each keep their own context.
+	 *
+	 * Being a per-call argument, rather than state on the shared renderer, is
+	 * what makes that so — and also why no mutation of this code can fail this
+	 * test: the property is structural, not defended by a branch. It is here to
+	 * say what the design guarantees, and it would catch a future rewrite that
+	 * moved the context onto the renderer.
+	 */
+	it("keeps two CONCURRENT requests apart", async () => {
+		const seen: Array<string | undefined> = [];
 		const renderer = new PhotonRenderer({
 			...base,
 			ssr: {
-				pages: (_component, ctx) => {
-					seen.push(ctx);
+				pages: async (_component, ctx) => {
+					const id = ctx?.request?.header("x-request-id");
+					// The two predicates overlap: this one yields while the other
+					// runs. Each still sees its own request.
+					await new Promise((resolve) => setTimeout(resolve, 5));
+					seen.push(
+						id === ctx?.request?.header("x-request-id") ? id : "LEAKED",
+					);
 					return true;
 				},
 			},
 		});
-		// Two requests through ONE renderer. If the context were held on the
-		// renderer, the second would see the first's — a cross-request leak.
-		await createPhotonContext(renderer, "/a", { id: 1 }).ssrEnabled("A");
-		await createPhotonContext(renderer, "/b", { id: 2 }).ssrEnabled("B");
-		expect(seen).toEqual([{ id: 1 }, { id: 2 }]);
+
+		// One renderer, two requests genuinely in flight at once.
+		await Promise.all([
+			createPhotonContext(
+				renderer,
+				"/a",
+				requestContext({ "x-request-id": "a" }),
+			).ssrEnabled("A"),
+			createPhotonContext(
+				renderer,
+				"/b",
+				requestContext({ "x-request-id": "b" }),
+			).ssrEnabled("B"),
+		]);
+		expect([...seen].sort()).toEqual(["a", "b"]);
 	});
 
 	it("still works for a predicate that ignores the context", async () => {
@@ -94,7 +146,7 @@ describe("photon > ssr.pages receives the request", () => {
 
 describe("photon > the middleware is what supplies the context", () => {
 	it("passes the very ctx it is serving to the predicate", async () => {
-		let seen: SsrRequestContext;
+		let seen: SsrRequestContext | undefined;
 		const mw = new PhotonMiddleware({
 			...base,
 			ssr: {
@@ -105,24 +157,7 @@ describe("photon > the middleware is what supplies the context", () => {
 			},
 		}).middleware();
 
-		const ctx: PhotonMiddlewareContext = {
-			request: {
-				method: () => "GET",
-				path: () => "/dashboard",
-				header: () => undefined,
-			},
-			response: {
-				status() {
-					return ctx.response;
-				},
-				header() {
-					return ctx.response;
-				},
-				send() {},
-				getHeader: () => undefined,
-			},
-		};
-
+		const ctx = requestContext({}, "/dashboard");
 		await mw(ctx, async () => {
 			// Inside the pipeline, where a controller would render.
 			await ctx.photon?.ssrEnabled("Dashboard");

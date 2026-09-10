@@ -9,6 +9,7 @@ import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PhotonError } from "./errors.js";
+import type { PhotonMiddlewareContext } from "./PhotonMiddleware.js";
 import { type PropsProtocolExtras, resolveProps } from "./props.js";
 import { type MetaTags, mergeMeta, serializeMetaTags } from "./seo/Meta.js";
 
@@ -32,15 +33,18 @@ export interface PageFlags {
 /**
  * The request a `pages` predicate is asked about.
  *
- * Typed as `unknown` rather than as ream's `HttpContext`: photon must not
- * depend on the framework to render, and a predicate that needs the context
- * annotates its own parameter. It is the very object the middleware attached
- * `ctx.photon` to, so everything on it is there.
+ * The very context the middleware serves the request on, so a predicate reads
+ * `ctx.request.header(...)` with no assertion. Deliberately NOT ream's
+ * `HttpContext`: the middleware works on this structural shape, and naming the
+ * framework class here would promise members it never passes.
+ *
+ * It stays a type parameter on {@link SsrConfig} for a host that drives the
+ * renderer itself: `SsrConfig<MyContext>`.
  */
-export type SsrRequestContext = unknown;
+export type SsrRequestContext = PhotonMiddlewareContext;
 
 /** Which pages to server-render. */
-export interface SsrConfig {
+export interface SsrConfig<Ctx = SsrRequestContext> {
 	/** Off entirely when false. Defaults to true when an SSR entry exists. */
 	enabled?: boolean;
 	/**
@@ -53,13 +57,10 @@ export interface SsrConfig {
 	 */
 	pages?:
 		| string[]
-		| ((
-				component: string,
-				ctx?: SsrRequestContext,
-		  ) => boolean | Promise<boolean>);
+		| ((component: string, ctx?: Ctx) => boolean | Promise<boolean>);
 }
 
-export interface PhotonConfig {
+export interface PhotonConfig<Ctx = SsrRequestContext> {
 	/** Frontend framework. */
 	framework: Framework;
 	/** Path to the frontend entry point (e.g., 'resources/app.tsx'). */
@@ -77,7 +78,7 @@ export interface PhotonConfig {
 	 */
 	defaultMeta?: MetaTags;
 	/** Which pages to server-render. Every page, unless narrowed here. */
-	ssr?: SsrConfig;
+	ssr?: SsrConfig<Ctx>;
 	/**
 	 * The application root, against which {@link buildDir} is resolved.
 	 *
