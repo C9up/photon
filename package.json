@@ -37,9 +37,9 @@
     "@c9up/ream": "^0.2.0",
     "react": ">=18",
     "react-dom": ">=18",
-    "vue": ">=3",
     "svelte": ">=5",
-    "vite": ">=5"
+    "vite": ">=5",
+    "vue": ">=3"
   },
   "peerDependenciesMeta": {
     "@c9up/ream": {
@@ -62,21 +62,21 @@
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.10",
+    "@biomejs/biome": "^2.5.12",
     "@c9up/ream": "^0.2.0",
-    "@types/node": "^22.19.15",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@vitest/coverage-v8": "^4.1.2",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitest/coverage-v8": "4.1.11",
     "jsdom": "^30.0.1",
-    "react": "^19",
-    "react-dom": "^19",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "reflect-metadata": "^0.2.2",
-    "svelte": "^5",
-    "typescript": "^6.0.2",
-    "vite": "^7.3.3",
-    "vitest": "^4.1.2",
-    "vue": "^3"
+    "svelte": "^5.57.0",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.6",
+    "vitest": "4.1.11",
+    "vue": "^3.5.42"
   },
   "pnpm": {
     "//": "Pin the test toolchain to the versions used in dev. Without a committed lockfile the standalone CI resolves fresh (esbuild 0.28.x / vitest 4.1.9), whose decorator transform flakes 'Invalid or unexpected token' on the @Meta decorator suites. Overrides only apply when this package is the install root (CI), so the monorepo workspace is unaffected.",
