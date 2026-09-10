@@ -250,7 +250,10 @@ export class PhotonMiddleware {
 						metaOverride?: MetaTags;
 				  }
 				| undefined;
-			const baseContext = createPhotonContext(this.#renderer, url);
+			// The context goes through so an `ssr.pages` predicate can decide on
+			// the request, as upstream's does. Nothing is stored on the
+			// renderer — it stays a singleton, this is a per-call argument.
+			const baseContext = createPhotonContext(this.#renderer, url, ctx);
 
 			// Seed the per-request meta accumulator from `@Meta()` on the
 			// route handler before next() so the controller can still

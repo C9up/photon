@@ -22,6 +22,7 @@ export type {
 	PhotonConfig,
 	RenderResult,
 	SsrConfig,
+	SsrRequestContext,
 } from "./PhotonRenderer.js";
 export { PhotonRenderer } from "./PhotonRenderer.js";
 export {

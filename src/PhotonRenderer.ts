@@ -30,18 +30,33 @@ export interface PageFlags {
 }
 
 /**
- * Which pages to server-render.
+ * The request a `pages` predicate is asked about.
  *
- * DEVIATION (named): AdonisJS passes the HTTP context to the `pages` callback.
- * Photon's renderer is deliberately context-free — it is constructed once and
- * shared across requests — so the callback receives the component name alone.
- * Gate on the request in the middleware instead.
+ * Typed as `unknown` rather than as ream's `HttpContext`: photon must not
+ * depend on the framework to render, and a predicate that needs the context
+ * annotates its own parameter. It is the very object the middleware attached
+ * `ctx.photon` to, so everything on it is there.
  */
+export type SsrRequestContext = unknown;
+
+/** Which pages to server-render. */
 export interface SsrConfig {
 	/** Off entirely when false. Defaults to true when an SSR entry exists. */
 	enabled?: boolean;
-	/** Restrict SSR to these components, by list or by predicate. */
-	pages?: string[] | ((component: string) => boolean | Promise<boolean>);
+	/**
+	 * Restrict SSR to these components, by list or by predicate.
+	 *
+	 * The predicate receives the HTTP context alongside the component, as
+	 * upstream's does, so a decision can turn on the request — a header, the
+	 * authenticated user, a feature flag. The renderer stays a singleton: the
+	 * context is passed through per call and never stored on it.
+	 */
+	pages?:
+		| string[]
+		| ((
+				component: string,
+				ctx?: SsrRequestContext,
+		  ) => boolean | Promise<boolean>);
 }
 
 export interface PhotonConfig {
@@ -437,10 +452,13 @@ export class PhotonRenderer {
 	 * `ssr.pages`, by list or by predicate. Everything is server-rendered when
 	 * neither is configured, which is what an app with an SSR entry expects.
 	 */
-	async ssrEnabled(component: string): Promise<boolean> {
+	async ssrEnabled(
+		component: string,
+		ctx?: SsrRequestContext,
+	): Promise<boolean> {
 		const ssr = this.#config.ssr;
 		if (ssr?.enabled === false) return false;
-		if (typeof ssr?.pages === "function") return ssr.pages(component);
+		if (typeof ssr?.pages === "function") return ssr.pages(component, ctx);
 		if (ssr?.pages) return ssr.pages.includes(component);
 		return true;
 	}
@@ -452,6 +470,7 @@ export class PhotonRenderer {
 		meta?: MetaTags,
 		flags: PageFlags = {},
 		sharedKeys: readonly string[] = [],
+		requestContext?: SsrRequestContext,
 	): Promise<RenderResult> {
 		// Unwrap the prop helpers before SSR too: a first load must see the same
 		// values a partial reload would, and an `optional()` resolver must stay
@@ -473,7 +492,7 @@ export class PhotonRenderer {
 
 		// SSR mode: render full HTML
 		let ssrHtml = "";
-		if (this.#ssrModule && (await this.ssrEnabled(component))) {
+		if (this.#ssrModule && (await this.ssrEnabled(component, requestContext))) {
 			try {
 				ssrHtml = await this.#ssrModule.render(pageData);
 			} catch (err) {

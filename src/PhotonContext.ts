@@ -9,6 +9,7 @@ import type {
 	PageFlags,
 	PhotonRenderer,
 	RenderResult,
+	SsrRequestContext,
 } from "./PhotonRenderer.js";
 import { type MetaTags, mergeMeta } from "./seo/Meta.js";
 
@@ -102,6 +103,13 @@ export interface PhotonContext {
 export function createPhotonContext(
 	renderer: PhotonRenderer,
 	url: string,
+	/**
+	 * The HTTP context this request is being served on, handed to an
+	 * `ssr.pages` predicate so a decision can turn on the request. Optional
+	 * because a context can be built without one — a test, a render outside
+	 * the HTTP pipeline.
+	 */
+	requestContext?: SsrRequestContext,
 ): PhotonContext {
 	let accumulated: MetaTags | undefined;
 	let shared: Record<string, unknown> = {};
@@ -119,7 +127,7 @@ export function createPhotonContext(
 			return renderer.getVersion();
 		},
 		ssrEnabled(component: string): Promise<boolean> {
-			return renderer.ssrEnabled(component);
+			return renderer.ssrEnabled(component, requestContext);
 		},
 		sharedKeys(): string[] {
 			return Object.keys(shared);
@@ -170,6 +178,7 @@ export function createPhotonContext(
 				finalMeta,
 				await this.resolvePageFlags(),
 				Object.keys(shared),
+				requestContext,
 			);
 		},
 	};
