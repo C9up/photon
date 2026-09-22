@@ -20,6 +20,27 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
+/**
+ * Wait until `ready()` holds, rather than for a fixed number of turns.
+ *
+ * A navigation fallback runs through a fetch, a response read and a rejected
+ * parse before it touches `location`, and how many microtask hops that takes
+ * is an implementation detail. Counting `setTimeout(0)`s guessed at it, won on
+ * a fast machine, and lost on CI — where the three fallback tests failed while
+ * passing everywhere else.
+ */
+async function waitFor(
+	ready: () => boolean,
+	what = "condition",
+	turns = 50,
+): Promise<void> {
+	for (let i = 0; i < turns; i += 1) {
+		if (ready()) return;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+	throw new Error(`waitFor: ${what} never became true`);
+}
+
 interface RouterTestState {
 	reactHydrate: Mock<(target: Element, node: unknown) => void>;
 	reactRender: Mock<() => void>;
@@ -277,6 +298,17 @@ describe("photon/client > router — fallback paths", () => {
 		Object.defineProperty(window, "location", {
 			configurable: true,
 			value: new Proxy(originalLocation, {
+				// Reads go to the REAL Location, with `target` as the receiver.
+				// `origin`, `pathname` and the rest are branded getters that refuse
+				// a proxy receiver — CI threw `'get origin' called on an object
+				// that is not a valid instance of Location` while the router read
+				// the origin, so it never reached the fallback these tests assert
+				// on. Node's own DOM happened to tolerate it, which is why this
+				// only ever failed there.
+				get(target, prop) {
+					const value = Reflect.get(target, prop, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
 				set(target, prop, value) {
 					if (prop === "href") {
 						hrefSetter(value);
@@ -291,8 +323,10 @@ describe("photon/client > router — fallback paths", () => {
 
 		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		dispatchClick(anchor);
-		await new Promise((r) => setTimeout(r, 0));
-		await new Promise((r) => setTimeout(r, 0));
+		await waitFor(
+			() => hrefSetter.mock.calls.length > 0,
+			"the fallback reload for /missing",
+		);
 
 		expect(hrefSetter).toHaveBeenCalledWith("/missing");
 		expect(errSpy).toHaveBeenCalled();
@@ -321,6 +355,17 @@ describe("photon/client > router — fallback paths", () => {
 		Object.defineProperty(window, "location", {
 			configurable: true,
 			value: new Proxy(originalLocation, {
+				// Reads go to the REAL Location, with `target` as the receiver.
+				// `origin`, `pathname` and the rest are branded getters that refuse
+				// a proxy receiver — CI threw `'get origin' called on an object
+				// that is not a valid instance of Location` while the router read
+				// the origin, so it never reached the fallback these tests assert
+				// on. Node's own DOM happened to tolerate it, which is why this
+				// only ever failed there.
+				get(target, prop) {
+					const value = Reflect.get(target, prop, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
 				set(target, prop, value) {
 					if (prop === "href") {
 						hrefSetter(value);
@@ -334,8 +379,10 @@ describe("photon/client > router — fallback paths", () => {
 		});
 
 		dispatchClick(anchor);
-		await new Promise((r) => setTimeout(r, 0));
-		await new Promise((r) => setTimeout(r, 0));
+		await waitFor(
+			() => hrefSetter.mock.calls.length > 0,
+			"the fallback reload for /html-page",
+		);
 
 		expect(hrefSetter).toHaveBeenCalledWith("/html-page");
 
@@ -372,6 +419,17 @@ describe("photon/client > router — fallback paths", () => {
 		Object.defineProperty(window, "location", {
 			configurable: true,
 			value: new Proxy(originalLocation, {
+				// Reads go to the REAL Location, with `target` as the receiver.
+				// `origin`, `pathname` and the rest are branded getters that refuse
+				// a proxy receiver — CI threw `'get origin' called on an object
+				// that is not a valid instance of Location` while the router read
+				// the origin, so it never reached the fallback these tests assert
+				// on. Node's own DOM happened to tolerate it, which is why this
+				// only ever failed there.
+				get(target, prop) {
+					const value = Reflect.get(target, prop, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
 				set(target, prop, value) {
 					if (prop === "href") {
 						hrefSetter(value);
@@ -385,8 +443,10 @@ describe("photon/client > router — fallback paths", () => {
 		});
 
 		dispatchClick(anchor);
-		await new Promise((r) => setTimeout(r, 0));
-		await new Promise((r) => setTimeout(r, 0));
+		await waitFor(
+			() => hrefSetter.mock.calls.length > 0,
+			"the fallback reload for /bad",
+		);
 
 		expect(hrefSetter).toHaveBeenCalledWith("/bad");
 
@@ -476,6 +536,17 @@ describe("photon/client > router — review hardenings (HIGH/MED patches)", () =
 		Object.defineProperty(window, "location", {
 			configurable: true,
 			value: new Proxy(originalLocation, {
+				// Reads go to the REAL Location, with `target` as the receiver.
+				// `origin`, `pathname` and the rest are branded getters that refuse
+				// a proxy receiver — CI threw `'get origin' called on an object
+				// that is not a valid instance of Location` while the router read
+				// the origin, so it never reached the fallback these tests assert
+				// on. Node's own DOM happened to tolerate it, which is why this
+				// only ever failed there.
+				get(target, prop) {
+					const value = Reflect.get(target, prop, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
 				set(target, prop, value) {
 					if (prop === "href") {
 						hrefSetter(value);
@@ -533,6 +604,17 @@ describe("photon/client > router — review hardenings (HIGH/MED patches)", () =
 		Object.defineProperty(window, "location", {
 			configurable: true,
 			value: new Proxy(originalLocation, {
+				// Reads go to the REAL Location, with `target` as the receiver.
+				// `origin`, `pathname` and the rest are branded getters that refuse
+				// a proxy receiver — CI threw `'get origin' called on an object
+				// that is not a valid instance of Location` while the router read
+				// the origin, so it never reached the fallback these tests assert
+				// on. Node's own DOM happened to tolerate it, which is why this
+				// only ever failed there.
+				get(target, prop) {
+					const value = Reflect.get(target, prop, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
 				set(target, prop, value) {
 					if (prop === "href") {
 						hrefSetter(value);
