@@ -1,0 +1,10 @@
+---
+to: config/photon.ts
+---
+import { defineConfig } from '@c9up/photon'
+
+export default defineConfig({
+  framework: 'react',
+  entryClient: 'resources/app.tsx',
+  entryServer: 'resources/ssr.tsx',
+})
