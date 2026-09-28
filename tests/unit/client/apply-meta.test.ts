@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyMetaToDom } from "../../../src/client/applyMeta.js";
-import type { MetaTags } from "../../../src/seo/Meta.js";
+import { type MetaTags, serializeMetaTags } from "../../../src/seo/Meta.js";
 
 /** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
 function defined<T>(value: T | null | undefined): T {
@@ -223,5 +223,31 @@ describe("photon > applyMetaToDom", () => {
 	it("skips empty keywords array (no <meta name=keywords> emitted)", () => {
 		applyMetaToDom({ title: "t", keywords: [] });
 		expect(document.head.querySelector(`meta[name="keywords"]`)).toBeNull();
+	});
+
+	it("replaces the tags the server rendered instead of adding beside them", () => {
+		document.head.innerHTML = serializeMetaTags({
+			title: "First",
+			description: "first page",
+			canonical: "https://example.com/first",
+			og: { title: "First" },
+		});
+		applyMetaToDom({
+			title: "Second",
+			description: "second page",
+			canonical: "https://example.com/second",
+			og: { title: "Second" },
+		});
+		const descriptions = document.head.querySelectorAll(
+			'meta[name="description"]',
+		);
+		expect(descriptions).toHaveLength(1);
+		expect(descriptions[0]?.getAttribute("content")).toBe("second page");
+		expect(
+			document.head.querySelectorAll('link[rel="canonical"]'),
+		).toHaveLength(1);
+		expect(
+			document.head.querySelectorAll('meta[property="og:title"]'),
+		).toHaveLength(1);
 	});
 });

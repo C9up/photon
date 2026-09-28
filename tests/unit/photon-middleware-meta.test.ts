@@ -78,7 +78,7 @@ describe("photon > PhotonMiddleware > meta accumulator", () => {
 		});
 		expect(captured?.html).toContain("<title>Second</title>");
 		expect(captured?.html).toContain(
-			'<meta name="description" content="Desc">',
+			'<meta name="description" content="Desc" data-photon-meta="1">',
 		);
 	});
 
@@ -108,7 +108,9 @@ describe("photon > PhotonMiddleware > meta accumulator", () => {
 			captured = await ctx.photon?.render("Home", {});
 		});
 		expect(captured?.html).toContain("<title>From decorator</title>");
-		expect(captured?.html).toContain('<meta name="description" content="D">');
+		expect(captured?.html).toContain(
+			'<meta name="description" content="D" data-photon-meta="1">',
+		);
 	});
 
 	it("imperative `ctx.photon.meta()` overrides decorator metadata", async () => {
@@ -128,7 +130,7 @@ describe("photon > PhotonMiddleware > meta accumulator", () => {
 		expect(captured?.html).toContain("<title>Imperative</title>");
 		// Description fell through from decorator (un-overridden).
 		expect(captured?.html).toContain(
-			'<meta name="description" content="Decorator">',
+			'<meta name="description" content="Decorator" data-photon-meta="1">',
 		);
 	});
 
@@ -149,7 +151,7 @@ describe("photon > PhotonMiddleware > meta accumulator", () => {
 			captured = await ctx.photon?.render("Show", {});
 		});
 		expect(captured?.html).toContain(
-			'<link rel="canonical" href="https://example.com/article/42">',
+			'<link rel="canonical" href="https://example.com/article/42" data-photon-meta="1">',
 		);
 	});
 

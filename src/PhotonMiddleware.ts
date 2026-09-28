@@ -187,11 +187,19 @@ function readStatus(res: Record<string, unknown>): number | undefined {
 	return typeof direct === "number" ? direct : undefined;
 }
 
-/** Write a bodyless response through whichever shape the host provides. */
+/**
+ * Write a response through whichever shape the host provides.
+ *
+ * Every method is called ON the response. Ream's keeps its state in private
+ * fields, so a method read off it and called bare throws — which is what the
+ * props response did, on every SPA navigation, while the mocks in the tests
+ * (plain closures) hid it.
+ */
 function writeResponse(
 	res: Record<string, unknown>,
 	status: number,
 	headers: Record<string, string>,
+	body = "",
 ): void {
 	const setStatus = Reflect.get(res, "status");
 	if (typeof setStatus === "function") {
@@ -201,7 +209,7 @@ function writeResponse(
 			for (const [k, v] of Object.entries(headers)) header.call(res, k, v);
 		}
 		const send = Reflect.get(res, "send");
-		if (typeof send === "function") send.call(res, "");
+		if (typeof send === "function") send.call(res, body);
 		return;
 	}
 	res.status = status;
@@ -210,7 +218,58 @@ function writeResponse(
 		...(typeof existing === "object" && existing !== null ? existing : {}),
 		...headers,
 	};
-	res.body = "";
+	res.body = body;
+}
+
+/**
+ * Add X-Photon to the response's Vary header.
+ *
+ * The same URL answers with a page or with its props depending on X-Photon, so
+ * a cache that ignores the header can hand the JSON to a browser loading the
+ * page, or the page to the client router. Every response, as upstream's
+ * middleware does: whether a later handler renders is not known yet.
+ */
+function varyOnPhoton(res: Record<string, unknown>): void {
+	const vary = Reflect.get(res, "vary");
+	if (typeof vary === "function") {
+		vary.call(res, "X-Photon");
+		return;
+	}
+	const current = readResponseHeader(res, "vary");
+	const fields = (current ?? "")
+		.split(",")
+		.map((field) => field.trim())
+		.filter((field) => field.length > 0);
+	if (fields.some((field) => field.toLowerCase() === "x-photon")) return;
+	const value = [...fields, "X-Photon"].join(", ");
+	const header = Reflect.get(res, "header");
+	if (typeof header === "function") {
+		header.call(res, "vary", value);
+		return;
+	}
+	const existing = Reflect.get(res, "headers");
+	res.headers = {
+		...(typeof existing === "object" && existing !== null ? existing : {}),
+		vary: value,
+	};
+}
+
+/** A response header, however the host exposes it. */
+function readResponseHeader(
+	res: Record<string, unknown>,
+	name: string,
+): string | undefined {
+	const getter = Reflect.get(res, "getHeader");
+	if (typeof getter === "function") {
+		const value = getter.call(res, name);
+		return typeof value === "string" ? value : undefined;
+	}
+	const bag = Reflect.get(res, "headers");
+	const value =
+		typeof bag === "object" && bag !== null
+			? Reflect.get(bag, name)
+			: undefined;
+	return typeof value === "string" ? value : undefined;
 }
 
 export class PhotonMiddleware {
@@ -246,6 +305,7 @@ export class PhotonMiddleware {
 				| {
 						component: string;
 						props: Record<string, unknown>;
+						sharedKeys: string[];
 						url: string;
 						metaOverride?: MetaTags;
 				  }
@@ -254,6 +314,15 @@ export class PhotonMiddleware {
 			// the request, as upstream's does. Nothing is stored on the
 			// renderer — it stays a singleton, this is a per-call argument.
 			const baseContext = createPhotonContext(this.#renderer, url, ctx);
+			// What has been shared so far. The props response is rebuilt after the
+			// handler returns, from what `render()` was given — and a shared prop,
+			// `errors` included, was never given to it, so SPA navigations lost
+			// every one. Kept here as the context keeps it, and read at render time.
+			let shared: Record<string, unknown> = {};
+			const share = (data: Record<string, unknown>): void => {
+				shared = { ...shared, ...data };
+				baseContext.share(data);
+			};
 
 			// Seed the per-request meta accumulator from `@Meta()` on the
 			// route handler before next() so the controller can still
@@ -262,10 +331,16 @@ export class PhotonMiddleware {
 
 			ctx.photon = {
 				render: async (component, props = {}, meta) => {
-					lastRenderArgs = { component, props, url, metaOverride: meta };
+					lastRenderArgs = {
+						component,
+						props: { ...shared, ...props },
+						sharedKeys: Object.keys(shared),
+						url,
+						metaOverride: meta,
+					};
 					return baseContext.render(component, props, meta);
 				},
-				share: (data) => baseContext.share(data),
+				share,
 				clearHistory: () => baseContext.clearHistory(),
 				encryptHistory: (encrypt) => baseContext.encryptHistory(encrypt),
 				flash: (provider) => baseContext.flash(provider),
@@ -319,18 +394,14 @@ export class PhotonMiddleware {
 			// keep their messages apart. A controller's own `errors` prop wins.
 			const errorBag = readHeader("x-photon-error-bag");
 			const errors = getValidationErrors(ctx);
-			baseContext.share({ errors: errorBag ? { [errorBag]: errors } : errors });
+			share({ errors: errorBag ? { [errorBag]: errors } : errors });
+
+			const res = ctx.response as Record<string, unknown> | undefined;
+			if (res) varyOnPhoton(res);
 
 			await next();
 
-			const res = ctx.response as Record<string, unknown> | undefined;
-			const ct = res
-				? typeof res.getHeader === "function"
-					? (res.getHeader as (n: string) => string | undefined)("content-type")
-					: (res.headers as Record<string, string> | undefined)?.[
-							"content-type"
-						]
-				: undefined;
+			const ct = res ? readResponseHeader(res, "content-type") : undefined;
 
 			// A 409 tells the SPA client to leave the fetch loop and navigate for
 			// real. Two things ask for it, and both must be answered BEFORE any
@@ -362,7 +433,6 @@ export class PhotonMiddleware {
 					writeResponse(res, 409, {
 						"x-photon-location": target,
 						"x-photon-version": version,
-						vary: "x-photon",
 					});
 					return;
 				}
@@ -405,25 +475,15 @@ export class PhotonMiddleware {
 					resolved.props,
 					lastRenderArgs.url,
 					finalMeta,
-					{ ...resolved.extras, ...(await baseContext.resolvePageFlags()) },
+					{
+						...resolved.extras,
+						...(lastRenderArgs.sharedKeys.length > 0
+							? { sharedProps: lastRenderArgs.sharedKeys }
+							: {}),
+						...(await baseContext.resolvePageFlags()),
+					},
 				);
-				if (typeof res.status === "function") {
-					(res.status as (c: number) => void)(propsOnly.status);
-					const hdr = res.header as
-						| ((k: string, v: string) => void)
-						| undefined;
-					if (hdr)
-						for (const [k, v] of Object.entries(propsOnly.headers)) hdr(k, v);
-					const send = res.send as ((body: string) => void) | undefined;
-					if (send) send(propsOnly.html);
-				} else {
-					res.status = propsOnly.status;
-					res.headers = {
-						...((res.headers as Record<string, string>) ?? {}),
-						...propsOnly.headers,
-					};
-					res.body = propsOnly.html;
-				}
+				writeResponse(res, propsOnly.status, propsOnly.headers, propsOnly.html);
 			}
 		};
 	}

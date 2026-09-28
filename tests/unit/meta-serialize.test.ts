@@ -17,25 +17,25 @@ describe("photon > seo > serializeMetaTags > scalars", () => {
 
 	it('emits `<meta name="description">` from the description field', () => {
 		expect(serializeMetaTags({ description: "Welcome" })).toBe(
-			'<meta name="description" content="Welcome">',
+			'<meta name="description" content="Welcome" data-photon-meta="1">',
 		);
 	});
 
 	it('emits `<link rel="canonical">` from the canonical field', () => {
 		expect(serializeMetaTags({ canonical: "https://example.com/x" })).toBe(
-			'<link rel="canonical" href="https://example.com/x">',
+			'<link rel="canonical" href="https://example.com/x" data-photon-meta="1">',
 		);
 	});
 
 	it('emits `<meta name="robots">` from the robots field', () => {
 		expect(serializeMetaTags({ robots: "noindex,nofollow" })).toBe(
-			'<meta name="robots" content="noindex,nofollow">',
+			'<meta name="robots" content="noindex,nofollow" data-photon-meta="1">',
 		);
 	});
 
 	it("joins keywords with `, ` and emits a single meta tag", () => {
 		expect(serializeMetaTags({ keywords: ["framework", "node", "ssr"] })).toBe(
-			'<meta name="keywords" content="framework, node, ssr">',
+			'<meta name="keywords" content="framework, node, ssr" data-photon-meta="1">',
 		);
 	});
 
@@ -58,25 +58,39 @@ describe("photon > seo > serializeMetaTags > Open Graph", () => {
 				locale: "en_US",
 			},
 		});
-		expect(out).toContain('<meta property="og:title" content="T">');
-		expect(out).toContain('<meta property="og:description" content="D">');
 		expect(out).toContain(
-			'<meta property="og:image" content="https://example.com/i.png">',
+			'<meta property="og:title" content="T" data-photon-meta="1">',
 		);
-		expect(out).toContain('<meta property="og:image:alt" content="alt">');
 		expect(out).toContain(
-			'<meta property="og:url" content="https://example.com">',
+			'<meta property="og:description" content="D" data-photon-meta="1">',
 		);
-		expect(out).toContain('<meta property="og:type" content="website">');
-		expect(out).toContain('<meta property="og:site_name" content="Example">');
-		expect(out).toContain('<meta property="og:locale" content="en_US">');
+		expect(out).toContain(
+			'<meta property="og:image" content="https://example.com/i.png" data-photon-meta="1">',
+		);
+		expect(out).toContain(
+			'<meta property="og:image:alt" content="alt" data-photon-meta="1">',
+		);
+		expect(out).toContain(
+			'<meta property="og:url" content="https://example.com" data-photon-meta="1">',
+		);
+		expect(out).toContain(
+			'<meta property="og:type" content="website" data-photon-meta="1">',
+		);
+		expect(out).toContain(
+			'<meta property="og:site_name" content="Example" data-photon-meta="1">',
+		);
+		expect(out).toContain(
+			'<meta property="og:locale" content="en_US" data-photon-meta="1">',
+		);
 		// Negative — must not produce `name="og:..."`.
 		expect(out).not.toContain('name="og:');
 	});
 
 	it("emits only the og:* fields that are set, omits the rest", () => {
 		const out = serializeMetaTags({ og: { title: "X" } });
-		expect(out).toBe('<meta property="og:title" content="X">');
+		expect(out).toBe(
+			'<meta property="og:title" content="X" data-photon-meta="1">',
+		);
 	});
 });
 
@@ -94,11 +108,17 @@ describe("photon > seo > serializeMetaTags > Twitter Cards", () => {
 			},
 		});
 		expect(out).toContain(
-			'<meta name="twitter:card" content="summary_large_image">',
+			'<meta name="twitter:card" content="summary_large_image" data-photon-meta="1">',
 		);
-		expect(out).toContain('<meta name="twitter:site" content="@example">');
-		expect(out).toContain('<meta name="twitter:creator" content="@kaen">');
-		expect(out).toContain('<meta name="twitter:title" content="T">');
+		expect(out).toContain(
+			'<meta name="twitter:site" content="@example" data-photon-meta="1">',
+		);
+		expect(out).toContain(
+			'<meta name="twitter:creator" content="@kaen" data-photon-meta="1">',
+		);
+		expect(out).toContain(
+			'<meta name="twitter:title" content="T" data-photon-meta="1">',
+		);
 		expect(out).not.toContain('property="twitter:');
 	});
 });
@@ -109,7 +129,7 @@ describe("photon > seo > serializeMetaTags > custom tags", () => {
 			serializeMetaTags({
 				custom: [{ name: "theme-color", content: "#0a0a0a" }],
 			}),
-		).toBe('<meta name="theme-color" content="#0a0a0a">');
+		).toBe('<meta name="theme-color" content="#0a0a0a" data-photon-meta="1">');
 	});
 
 	it("emits a custom tag with `property`", () => {
@@ -117,7 +137,7 @@ describe("photon > seo > serializeMetaTags > custom tags", () => {
 			serializeMetaTags({
 				custom: [{ property: "fb:app_id", content: "1234" }],
 			}),
-		).toBe('<meta property="fb:app_id" content="1234">');
+		).toBe('<meta property="fb:app_id" content="1234" data-photon-meta="1">');
 	});
 
 	it("emits a custom tag with `http-equiv`", () => {
@@ -125,12 +145,14 @@ describe("photon > seo > serializeMetaTags > custom tags", () => {
 			serializeMetaTags({
 				custom: [{ httpEquiv: "X-UA-Compatible", content: "IE=edge" }],
 			}),
-		).toBe('<meta http-equiv="X-UA-Compatible" content="IE=edge">');
+		).toBe(
+			'<meta http-equiv="X-UA-Compatible" content="IE=edge" data-photon-meta="1">',
+		);
 	});
 
 	it("emits a custom tag with `charset` only", () => {
 		expect(serializeMetaTags({ custom: [{ charset: "UTF-8" }] })).toBe(
-			'<meta charset="UTF-8">',
+			'<meta charset="UTF-8" data-photon-meta="1">',
 		);
 	});
 });

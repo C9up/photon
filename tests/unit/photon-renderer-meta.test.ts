@@ -29,12 +29,14 @@ describe("photon > PhotonRenderer > head injection", () => {
 			og: { title: "OG", image: "https://example.com/i.png" },
 			twitter: { card: "summary_large_image", site: "@example" },
 		});
-		expect(out.html).toContain('<meta property="og:title" content="OG">');
 		expect(out.html).toContain(
-			'<meta property="og:image" content="https://example.com/i.png">',
+			'<meta property="og:title" content="OG" data-photon-meta="1">',
 		);
 		expect(out.html).toContain(
-			'<meta name="twitter:card" content="summary_large_image">',
+			'<meta property="og:image" content="https://example.com/i.png" data-photon-meta="1">',
+		);
+		expect(out.html).toContain(
+			'<meta name="twitter:card" content="summary_large_image" data-photon-meta="1">',
 		);
 	});
 
@@ -67,13 +69,15 @@ describe("photon > PhotonRenderer > head injection", () => {
 		expect(out.html).toContain("<title>Override Title</title>");
 		// Description carried from defaults (not overridden).
 		expect(out.html).toContain(
-			'<meta name="description" content="Default desc">',
+			'<meta name="description" content="Default desc" data-photon-meta="1">',
 		);
 		// og fields field-merged: siteName from defaults + image from call.
 		expect(out.html).toContain(
-			'<meta property="og:site_name" content="Example">',
+			'<meta property="og:site_name" content="Example" data-photon-meta="1">',
 		);
-		expect(out.html).toContain('<meta property="og:image" content="/i.png">');
+		expect(out.html).toContain(
+			'<meta property="og:image" content="/i.png" data-photon-meta="1">',
+		);
 	});
 
 	it("when no meta is provided anywhere, the head matches the legacy shape", async () => {

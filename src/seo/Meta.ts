@@ -63,6 +63,17 @@ function escapeHtml(value: string): string {
 		.replace(/'/g, "&#39;");
 }
 
+/**
+ * The attribute that marks a tag as Photon's, so the client router replaces it
+ * on navigation. Must match `PHOTON_OWNED_ATTR` in `client/applyMeta.ts`, which
+ * cannot import it — the browser bundle stays free of this module's callers.
+ *
+ * The tags rendered on the server carry it too. Without it the first SPA
+ * navigation left them in place and added its own beside them: two canonicals,
+ * two descriptions, two sets of Open Graph tags.
+ */
+const OWNED = 'data-photon-meta="1"';
+
 function metaTag(attrs: Record<string, string | undefined>): string | null {
 	const parts: string[] = [];
 	for (const [key, value] of Object.entries(attrs)) {
@@ -70,7 +81,7 @@ function metaTag(attrs: Record<string, string | undefined>): string | null {
 		parts.push(`${key}="${escapeHtml(value)}"`);
 	}
 	if (parts.length === 0) return null;
-	return `<meta ${parts.join(" ")}>`;
+	return `<meta ${parts.join(" ")} ${OWNED}>`;
 }
 
 /**
@@ -100,7 +111,9 @@ function basicMetaTags(meta: MetaTags): string[] {
 		pushTag(out, metaTag({ name: "description", content: meta.description }));
 	}
 	if (meta.canonical) {
-		out.push(`<link rel="canonical" href="${escapeHtml(meta.canonical)}">`);
+		out.push(
+			`<link rel="canonical" href="${escapeHtml(meta.canonical)}" ${OWNED}>`,
+		);
 	}
 	if (meta.robots)
 		pushTag(out, metaTag({ name: "robots", content: meta.robots }));

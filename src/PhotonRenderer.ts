@@ -67,8 +67,26 @@ export interface PhotonConfig<Ctx = SsrRequestContext> {
 	entryClient: string;
 	/** Path to the SSR entry point (e.g., 'resources/ssr.tsx'). */
 	entryServer: string;
-	/** Build output directory (default: 'public/build'). */
+	/** Where the client build is written, on disk (default: 'public/build'). */
 	buildDir?: string;
+	/**
+	 * The URL the client build is served from (default: '/build').
+	 *
+	 * Not derived from {@link buildDir}: that is a path on disk, and the static
+	 * server strips its own root from it — `public/build/app.js` is served as
+	 * `/build/app.js`. Using the path as the URL sent every page to
+	 * `/public/build/…`, which 404'd, so nothing hydrated. Set both when the
+	 * build moves, or when the assets come from a CDN.
+	 */
+	assetsUrl?: string;
+	/**
+	 * Where the server-rendering bundle is written (default: 'build/ssr').
+	 *
+	 * Outside anything the static server serves, and refused inside
+	 * {@link buildDir} or `public/`: under the client build it was downloadable
+	 * as `/build/ssr/ssr.js`, server code and all.
+	 */
+	ssrBuildDir?: string;
 	/** Vite dev server URL (default: 'http://localhost:5173'). */
 	viteDevUrl?: string;
 	/**
@@ -302,23 +320,31 @@ export class PhotonRenderer {
 			// The application's own root, not the directory the process happens
 			// to have started in.
 			const projectRoot = path.resolve(this.#config.appRoot ?? process.cwd());
-			const buildDir = this.#config.buildDir ?? "public/build";
-			// Validate buildDir is within project root. `path.resolve` already
-			// normalises `..` segments, but a buildDir that *equals* the project
-			// root (`""`, `"."`, `"public/.."`) yields an empty relative path
-			// and would silently sneak past a naive `startsWith("..")` check —
-			// reject that explicitly alongside escapes and absolute paths.
-			const absBuildDir = path.resolve(projectRoot, buildDir);
-			const rel = path.normalize(path.relative(projectRoot, absBuildDir));
-			if (
-				rel === "" ||
-				rel === "." ||
-				rel.startsWith("..") ||
-				path.isAbsolute(rel)
-			) {
+			const absBuildDir = resolveSubdirectory(
+				projectRoot,
+				this.#config.buildDir ?? "public/build",
+				"buildDir",
+			);
+			const absSsrBuildDir = resolveSubdirectory(
+				projectRoot,
+				this.#config.ssrBuildDir ?? "build/ssr",
+				"ssrBuildDir",
+			);
+			for (const served of [absBuildDir, path.join(projectRoot, "public")]) {
+				if (isWithin(served, absSsrBuildDir)) {
+					throw new PhotonError(
+						"E_PHOTON_INVALID_CONFIG",
+						`ssrBuildDir must not be inside ${path.relative(projectRoot, served)} — the static server would hand the server bundle to anyone who asks`,
+						{
+							hint: "Build the SSR entry to a directory nothing serves, such as build/ssr.",
+						},
+					);
+				}
+			}
+			if (!isAssetsUrl(this.#assetsUrl())) {
 				throw new PhotonError(
 					"E_PHOTON_INVALID_CONFIG",
-					"buildDir must be a subdirectory of the project root",
+					"assetsUrl must be a root-relative path or an http(s) URL",
 				);
 			}
 			const entryPattern = /^[\w./\-@#]+\.(tsx?|jsx?|vue|svelte)$/;
@@ -375,27 +401,39 @@ export class PhotonRenderer {
 				);
 			}
 			const ssrModule = await loadSsrModule(
-				absBuildDir,
+				absSsrBuildDir,
 				this.#config.entryServer,
 			);
 			this.#ssrModule = ssrModule;
+			// A manifest that is there but unreadable fails the boot. It used to
+			// be skipped with a warning, and every page then pointed at a
+			// `client.js` the build never wrote: a server that looked healthy and
+			// served pages that never hydrated.
+			let manifest: unknown;
 			try {
-				const manifestRaw = await readFile(manifestPath, "utf8");
-				this.#manifest = JSON.parse(manifestRaw) as Record<
-					string,
-					ViteManifestEntry | string[]
-				>;
+				manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 			} catch (manifestErr) {
-				// Best-effort read (precheck already confirmed presence) — a
-				// permission flip, concurrent rename, or malformed JSON between
-				// check and read degrades to "no asset preload" rather than a
-				// hard boot failure. Warn loudly so the silent degradation is
-				// observable in production logs (Adonis convention: never
-				// swallow without telling someone).
-				console.warn(
-					`[photon] manifest at ${manifestPath} could not be read after the access precheck — asset preloading disabled for this boot. ${manifestErr instanceof Error ? manifestErr.message : String(manifestErr)}`,
+				throw new PhotonError(
+					"E_PHOTON_MANIFEST_INVALID",
+					`Vite manifest at ${manifestPath} could not be read or parsed`,
+					{
+						hint: "Rebuild the client and redeploy the whole build directory.",
+						context: { manifestPath },
+						cause: manifestErr,
+					},
 				);
 			}
+			if (!isManifest(manifest)) {
+				throw new PhotonError(
+					"E_PHOTON_MANIFEST_INVALID",
+					`Vite manifest at ${manifestPath} is not a manifest object`,
+					{
+						hint: "Rebuild the client and redeploy the whole build directory.",
+						context: { manifestPath },
+					},
+				);
+			}
+			this.#manifest = manifest;
 		} catch (err) {
 			// Re-throw structured PhotonError instances unchanged so callers
 			// see the precise code (E_PHOTON_INVALID_CONFIG /
@@ -565,7 +603,7 @@ export class PhotonRenderer {
 		meta?: MetaTags,
 		/** Protocol extras from the resolver — what the client must come back
 		 * for, and what it should combine rather than replace. */
-		extras?: PropsProtocolExtras & PageFlags,
+		extras?: PropsProtocolExtras & PageFlags & { sharedProps?: string[] },
 	): RenderResult {
 		const finalMeta = mergeMeta(this.#config.defaultMeta, meta);
 		const hasMeta =
@@ -616,9 +654,9 @@ export class PhotonRenderer {
 		}
 
 		// Production: read from manifest
-		const buildDir = this.#config.buildDir ?? "public/build";
+		const base = this.#assetsUrl();
 		if (!this.#manifest) {
-			return { css: [], js: [`/${buildDir}/client.js`] };
+			return { css: [], js: [`${base}/client.js`] };
 		}
 
 		const entry = resolveManifestEntry(
@@ -631,14 +669,14 @@ export class PhotonRenderer {
 				this.#config.entryClient,
 				"js",
 			)
-				.map((f) => `/${buildDir}/${f}`)
+				.map((f) => `${base}/${f}`)
 				.filter((u) => isSafeUrl(u) && !u.includes(".."));
 			const css = collectManifestAssets(
 				this.#manifest,
 				this.#config.entryClient,
 				"css",
 			)
-				.map((f) => `/${buildDir}/${f}`)
+				.map((f) => `${base}/${f}`)
 				.filter((u) => isSafeUrl(u) && !u.includes(".."));
 			return { css, js };
 		}
@@ -648,7 +686,7 @@ export class PhotonRenderer {
 			.filter(([key]) => key.endsWith(".css"))
 			.filter(([, v]) => Array.isArray(v))
 			.flatMap(([, files]) => files as string[])
-			.map((f) => `/${buildDir}/${f}`)
+			.map((f) => `${base}/${f}`)
 			.filter((u) => isSafeUrl(u) && !u.includes(".."));
 
 		const js = Object.entries(this.#manifest)
@@ -658,10 +696,15 @@ export class PhotonRenderer {
 			)
 			.filter(([, v]) => Array.isArray(v))
 			.flatMap(([, files]) => files as string[])
-			.map((f) => `/${buildDir}/${f}`)
+			.map((f) => `${base}/${f}`)
 			.filter((u) => isSafeUrl(u) && !u.includes(".."));
 
 		return { css, js };
+	}
+
+	/** The URL prefix of the client build, without a trailing slash. */
+	#assetsUrl(): string {
+		return (this.#config.assetsUrl ?? "/build").replace(/\/+$/, "");
 	}
 
 	#buildCspHeader(): string {
@@ -739,14 +782,62 @@ function isSafeUrl(url: string): boolean {
 	);
 }
 
+/**
+ * `dir` resolved against `projectRoot`, refused unless it is strictly inside it.
+ *
+ * `path.resolve` already normalises `..` segments, but a directory that EQUALS
+ * the root (`""`, `"."`, `"public/.."`) yields an empty relative path and would
+ * sneak past a naive `startsWith("..")` check — refused alongside escapes and
+ * absolute paths.
+ */
+function resolveSubdirectory(
+	projectRoot: string,
+	dir: string,
+	option: string,
+): string {
+	const abs = path.resolve(projectRoot, dir);
+	if (!isWithin(projectRoot, abs)) {
+		throw new PhotonError(
+			"E_PHOTON_INVALID_CONFIG",
+			`${option} must be a subdirectory of the project root`,
+		);
+	}
+	return abs;
+}
+
+/** Whether `child` is strictly inside `parent`. */
+function isWithin(parent: string, child: string): boolean {
+	const rel = path.normalize(path.relative(parent, child));
+	return (
+		rel !== "" && rel !== "." && !rel.startsWith("..") && !path.isAbsolute(rel)
+	);
+}
+
+/** A root-relative path (not `//host`) or an absolute http(s) URL. */
+function isAssetsUrl(url: string): boolean {
+	return (
+		(url.startsWith("/") && !url.startsWith("//")) ||
+		url.startsWith("http://") ||
+		url.startsWith("https://") ||
+		url === ""
+	);
+}
+
+/** The top level of a Vite manifest: an object of entries, not a list. */
+function isManifest(
+	value: unknown,
+): value is Record<string, ViteManifestEntry | string[]> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 async function loadSsrModule(
-	absBuildDir: string,
+	absSsrBuildDir: string,
 	entryServer: string,
 ): Promise<{ render: (page: PageProps) => Promise<string> | string }> {
 	const parsed = path.parse(entryServer);
 	const candidates = [
-		path.join(absBuildDir, "ssr", "ssr.js"),
-		path.join(absBuildDir, "ssr", `${parsed.name}.js`),
+		path.join(absSsrBuildDir, "ssr.js"),
+		path.join(absSsrBuildDir, `${parsed.name}.js`),
 	];
 	const seen = new Set<string>();
 	let lastImportError: unknown;

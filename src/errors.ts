@@ -16,7 +16,8 @@ export type PhotonErrorCode =
 	| "E_PHOTON_INVALID_CONFIG"
 	| "E_PHOTON_SSR_LOAD_FAILED"
 	| "E_PHOTON_SSR_RENDER_FAILED"
-	| "E_PHOTON_MANIFEST_MISSING";
+	| "E_PHOTON_MANIFEST_MISSING"
+	| "E_PHOTON_MANIFEST_INVALID";
 
 /**
  * Base URL for the Photon error catalog. The `docsUrl` getter appends

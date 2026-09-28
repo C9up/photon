@@ -1,7 +1,7 @@
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PhotonError } from "../../src/errors.js";
 import { type PhotonConfig, PhotonRenderer } from "../../src/PhotonRenderer.js";
 
@@ -106,7 +106,8 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		// throwing transitive dep, throwing side-effect) must surface its real
 		// cause (audit 2026-06-13).
 		const buildDir = path.join(cwd, "public/build");
-		const ssrDir = path.join(buildDir, "ssr");
+		const ssrDir = path.join(cwd, "build/ssr");
+		await fsp.mkdir(buildDir, { recursive: true });
 		await fsp.mkdir(ssrDir, { recursive: true });
 		await fsp.writeFile(
 			path.join(ssrDir, "ssr.js"),
@@ -132,40 +133,82 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		}
 	});
 
-	it("malformed manifest JSON degrades silently after warn (SSR loads, manifest readFile fails inside best-effort catch)", async () => {
-		// The precheck only checks file presence, not JSON validity. With a
-		// valid SSR entry on disk, `loadSsrModule` succeeds and the boot path
-		// then reaches the inner readFile + JSON.parse on the manifest. A
-		// corrupt manifest passes `fs.access` but `JSON.parse` throws inside
-		// the inner best-effort catch. Documented contract: asset preloading
-		// silently disabled + console.warn surfaced + boot completes.
+	/** A built app: the SSR bundle where it belongs, and `manifest` as given. */
+	async function writeBuild(manifest: string): Promise<string> {
 		const buildDir = path.join(cwd, "public/build");
-		const ssrDir = path.join(buildDir, "ssr");
+		const ssrDir = path.join(cwd, "build/ssr");
+		await fsp.mkdir(path.join(buildDir, ".vite"), { recursive: true });
 		await fsp.mkdir(ssrDir, { recursive: true });
-		// Minimal valid SSR module — exports a render() returning a string.
-		// loadSsrModule probes `<buildDir>/ssr/ssr.js` first.
 		await fsp.writeFile(
 			path.join(ssrDir, "ssr.js"),
 			"export function render() { return ''; }",
 			"utf8",
 		);
-		await fsp.writeFile(
-			path.join(buildDir, "manifest.json"),
-			"not valid json {",
-			"utf8",
-		);
+		const manifestPath = path.join(buildDir, ".vite", "manifest.json");
+		await fsp.writeFile(manifestPath, manifest, "utf8");
+		return manifestPath;
+	}
 
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const r = new PhotonRenderer(baseConfig);
-			await r.boot();
-			// boot() resolves cleanly — manifest read failure was swallowed.
-			expect(warnSpy).toHaveBeenCalledTimes(1);
-			const warnMessage = String(warnSpy.mock.calls[0]?.[0] ?? "");
-			expect(warnMessage).toContain("manifest");
-			expect(warnMessage).toContain(path.join(buildDir, "manifest.json"));
-		} finally {
-			warnSpy.mockRestore();
+	it("fails the boot on a manifest that is there but not valid", async () => {
+		// It used to be skipped with a warning, and every page then pointed at a
+		// client.js the build never wrote — a healthy-looking server whose pages
+		// never hydrated.
+		for (const manifest of ["not valid json {", "[]", "null"]) {
+			const manifestPath = await writeBuild(manifest);
+			const err = await expectPhotonError(
+				new PhotonRenderer(baseConfig).boot(),
+				`manifest ${manifest}`,
+			);
+			expect(err.code).toBe("E_PHOTON_MANIFEST_INVALID");
+			expect(err.message).toContain(manifestPath);
 		}
+	});
+
+	it("serves the assets from /build, the URL the static server gives public/build", async () => {
+		await writeBuild(
+			JSON.stringify({
+				"resources/app.tsx": {
+					file: "assets/app-1.js",
+					css: ["assets/app-1.css"],
+					isEntry: true,
+				},
+			}),
+		);
+		const r = new PhotonRenderer(baseConfig);
+		await r.boot();
+		const { html } = await r.render("Home", {}, "/");
+		expect(html).toContain('src="/build/assets/app-1.js"');
+		expect(html).toContain('href="/build/assets/app-1.css"');
+		expect(html).not.toContain("/public/");
+
+		const cdn = new PhotonRenderer({
+			...baseConfig,
+			assetsUrl: "https://cdn.example/app/",
+		});
+		await cdn.boot();
+		expect((await cdn.render("Home", {}, "/")).html).toContain(
+			'src="https://cdn.example/app/assets/app-1.js"',
+		);
+	});
+
+	it("refuses an SSR bundle anywhere the static server would serve it", async () => {
+		await writeBuild("{}");
+		for (const ssrBuildDir of ["public/build/ssr", "public/ssr"]) {
+			const err = await expectPhotonError(
+				new PhotonRenderer({ ...baseConfig, ssrBuildDir }).boot(),
+				ssrBuildDir,
+			);
+			expect(err.code).toBe("E_PHOTON_INVALID_CONFIG");
+			expect(err.message).toContain("ssrBuildDir must not be inside");
+		}
+	});
+
+	it("refuses an assetsUrl that names another host by its path", async () => {
+		await writeBuild("{}");
+		const err = await expectPhotonError(
+			new PhotonRenderer({ ...baseConfig, assetsUrl: "//evil.example" }).boot(),
+			"protocol-relative assetsUrl",
+		);
+		expect(err.code).toBe("E_PHOTON_INVALID_CONFIG");
 	});
 });

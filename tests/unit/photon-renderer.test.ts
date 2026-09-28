@@ -113,10 +113,15 @@ describe("photon > PhotonRenderer > render() in prod mode (without manifest)", (
 		expect(csp).not.toContain("ws:");
 	});
 
-	it("falls back to /<buildDir>/client.js when no manifest is loaded", async () => {
-		const r = new PhotonRenderer({ ...baseConfig, buildDir: "public/dist" });
-		const result = await r.render("Home", {}, "/");
-		expect(result.html).toContain('src="/public/dist/client.js"');
+	it("falls back to <assetsUrl>/client.js when no manifest is loaded", async () => {
+		const r = new PhotonRenderer(baseConfig);
+		expect((await r.render("Home", {}, "/")).html).toContain(
+			'src="/build/client.js"',
+		);
+		const moved = new PhotonRenderer({ ...baseConfig, assetsUrl: "/dist/" });
+		expect((await moved.render("Home", {}, "/")).html).toContain(
+			'src="/dist/client.js"',
+		);
 	});
 });
 

@@ -295,15 +295,32 @@ export function isScrollProp(value: unknown): value is ScrollProp {
 	return kindOf(value) === "scroll";
 }
 
-/** Read one offset-pagination field off a paginator or its `meta`. */
-function pageField(source: unknown, field: string): number | undefined {
+/**
+ * Read one offset-pagination field off a paginator or its `meta`, when it has
+ * the type `is` accepts. Typed by the caller because the fields differ: the
+ * page numbers are numbers, and `pageName` is a string — which a number-only
+ * reader could never return, so a paginator's own page name was always lost.
+ */
+function pageField<T>(
+	source: unknown,
+	field: string,
+	is: (value: unknown) => value is T,
+): T | undefined {
 	if (typeof source !== "object" || source === null) return undefined;
 	const direct = Reflect.get(source, field);
-	if (typeof direct === "number") return direct;
+	if (is(direct)) return direct;
 	const meta = Reflect.get(source, "meta");
 	if (typeof meta !== "object" || meta === null) return undefined;
 	const nested = Reflect.get(meta, field);
-	return typeof nested === "number" ? nested : undefined;
+	return is(nested) ? nested : undefined;
+}
+
+function isNumber(value: unknown): value is number {
+	return typeof value === "number";
+}
+
+function isString(value: unknown): value is string {
+	return typeof value === "string";
 }
 
 /**
@@ -315,17 +332,16 @@ function pageField(source: unknown, field: string): number | undefined {
  * the reader the same page forever.
  */
 function offsetPaginatorCursor(value: unknown): ScrollCursor {
-	const currentPage = pageField(value, "currentPage");
+	const currentPage = pageField(value, "currentPage", isNumber);
 	if (currentPage === undefined) {
 		throw new TypeError(
 			'Cannot derive an infinite-scroll cursor from this value. Pass a cursor callback as the second argument to "scroll()" for cursor paginators and custom sources.',
 		);
 	}
-	const lastPage = pageField(value, "lastPage") ?? currentPage;
-	const firstPage = pageField(value, "firstPage") ?? 1;
-	const pageName = pageField(value, "pageName");
+	const lastPage = pageField(value, "lastPage", isNumber) ?? currentPage;
+	const firstPage = pageField(value, "firstPage", isNumber) ?? 1;
 	return {
-		pageName: typeof pageName === "string" ? pageName : "page",
+		pageName: pageField(value, "pageName", isString) ?? "page",
 		currentPage,
 		nextPage: currentPage < lastPage ? currentPage + 1 : null,
 		previousPage: currentPage > firstPage ? currentPage - 1 : null,

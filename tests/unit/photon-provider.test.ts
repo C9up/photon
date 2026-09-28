@@ -75,4 +75,34 @@ describe("photon > PhotonProvider", () => {
 			/Photon config/,
 		);
 	});
+
+	it("shutdown closes the renderer boot started, and only once", async () => {
+		const { app, container } = makeApp({
+			photon: {
+				framework: "react",
+				entryClient: "resources/app.tsx",
+				entryServer: "resources/ssr.tsx",
+			},
+		});
+		const provider = new PhotonProvider(app);
+		provider.register();
+		const renderer = await container.resolve<PhotonRenderer>(PhotonRenderer);
+		let closes = 0;
+		renderer.useDevServer({
+			ssrLoadModule: async () => ({}),
+			close: async () => {
+				closes++;
+			},
+		});
+		await provider.boot();
+		await provider.shutdown();
+		await provider.shutdown();
+		expect(closes).toBe(1);
+	});
+
+	it("shutdown before boot is a no-op", async () => {
+		await expect(new PhotonProvider(makeApp({}).app).shutdown()).resolves.toBe(
+			undefined,
+		);
+	});
 });

@@ -404,6 +404,21 @@ function paginator(currentPage: number, lastPage: number, rows: number[]) {
 }
 
 describe("photon > scroll", () => {
+	it("reads the paginator's own page name, directly or under meta", async () => {
+		for (const users of [
+			{ data: [1], currentPage: 1, lastPage: 2, pageName: "users_page" },
+			{
+				data: [1],
+				meta: { currentPage: 1, lastPage: 2, pageName: "users_page" },
+			},
+		]) {
+			const out = await resolveProps({ users: scroll(() => users) }, "Users");
+			expect(defined(out.extras.scrollProps?.users).pageName).toBe(
+				"users_page",
+			);
+		}
+	});
+
 	it("labels the data array and carries the cursor beside it", async () => {
 		const out = await resolveProps(
 			{ users: scroll(() => paginator(2, 5, [3, 4])) },

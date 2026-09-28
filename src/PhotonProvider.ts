@@ -30,6 +30,9 @@ export interface PhotonAppContext {
 }
 
 export default class PhotonProvider {
+	/** The renderer `boot()` started, so `shutdown()` stops the same one. */
+	#renderer?: PhotonRenderer;
+
 	constructor(protected app: PhotonAppContext) {}
 
 	register() {
@@ -55,8 +58,17 @@ export default class PhotonProvider {
 	async boot() {
 		const renderer =
 			await this.app.container.resolve<PhotonRenderer>(PhotonRenderer);
+		this.#renderer = renderer;
 		await renderer.boot();
 	}
 
-	async shutdown() {}
+	/**
+	 * Stop the dev SSR compiler. It holds a watcher and a module graph, and left
+	 * running it kept the process alive after the shutdown signal.
+	 */
+	async shutdown() {
+		const renderer = this.#renderer;
+		this.#renderer = undefined;
+		await renderer?.close();
+	}
 }
