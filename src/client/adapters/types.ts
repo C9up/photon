@@ -8,7 +8,15 @@
  */
 
 export interface PhotonAdapterHandle {
-	/** Re-render the mounted root with a new component + props. Called by the SPA-nav router. */
+	/**
+	 * Re-render the mounted root with a new component + props. Called by the
+	 * SPA-nav router.
+	 *
+	 * Given the component already on screen, React and Vue update its props in
+	 * place and keep its state — what props arriving after the page (a deferred
+	 * group, a partial reload) need. Svelte does the same through its root
+	 * (`@c9up/photon/svelte`), and remounts without one.
+	 */
 	update(Component: unknown, props: Record<string, unknown>): void;
 	/** Tear down the mounted root. Optional — currently used only by tests. */
 	unmount(): void;
@@ -25,5 +33,12 @@ export interface PhotonAdapter {
 		target: Element,
 		Component: unknown,
 		props: Record<string, unknown>,
+		options?: AdapterOptions,
 	): Promise<PhotonAdapterHandle>;
+}
+
+/** What an adapter may need beyond the page. */
+export interface AdapterOptions {
+	/** Svelte only: the root component from `@c9up/photon/svelte`. */
+	svelteRoot?: unknown;
 }

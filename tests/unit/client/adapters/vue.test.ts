@@ -1,109 +1,99 @@
 /**
  * @vitest-environment jsdom
+ *
+ * Against the real Vue runtime, not a mock of it: what matters here is what
+ * Vue does with the adapter's root — whether it hydrates the server's markup,
+ * and whether a component keeps its state when new props arrive.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSSRApp, defineComponent, h, nextTick, ref } from "vue";
+import { renderToString } from "vue/server-renderer";
+import { vueAdapter } from "../../../../src/client/adapters/vue.js";
 
-/** Narrow away null without a `!` non-null assertion (which lies to the compiler). */
-function defined<T>(value: T | null | undefined): T {
-	if (value == null) throw new Error("expected a defined value (#app element)");
-	return value;
+/** A button that counts its own clicks, labelled by a prop. */
+const Counter = defineComponent({
+	props: { label: { type: String, required: true } },
+	setup(props) {
+		const clicks = ref(0);
+		return () =>
+			h(
+				"button",
+				{ onClick: () => clicks.value++ },
+				`${props.label}:${clicks.value}`,
+			);
+	},
+});
+
+const Other = defineComponent({
+	props: { label: { type: String, required: true } },
+	setup(props) {
+		return () => h("p", `other ${props.label}`);
+	},
+});
+
+/** `#app` holding what the server would have rendered for `props`. */
+async function serverRendered(props: Record<string, unknown>) {
+	const target = document.createElement("div");
+	target.innerHTML = await renderToString(createSSRApp(Counter, props));
+	document.body.replaceChildren(target);
+	return target;
 }
 
-beforeEach(() => {
-	document.documentElement.innerHTML = '<div id="app">SSR</div>';
-});
+function button(target: Element): HTMLButtonElement {
+	const el = target.querySelector("button");
+	if (!el) throw new Error("expected the counter's button");
+	return el;
+}
 
 afterEach(() => {
 	vi.restoreAllMocks();
-	vi.doUnmock("vue");
-	vi.resetModules();
+	document.body.replaceChildren();
 });
 
 describe("photon/client/adapters/vue", () => {
-	it("hydrate uses createSSRApp(Component, props) then mount(target)", async () => {
-		const mount = vi.fn();
-		const unmount = vi.fn();
-		const createSSRApp = vi.fn((_root: unknown, _props: unknown) => ({
-			mount,
-			unmount,
-		}));
-		vi.doMock("vue", () => ({ createSSRApp }));
+	it("hydrates the server's markup without a mismatch", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const target = await serverRendered({ label: "a" });
+		const ssrButton = button(target);
 
-		const { vueAdapter } = await import(
-			"../../../../src/client/adapters/vue.js"
-		);
-		const target = defined(document.getElementById("app"));
-		await vueAdapter.hydrate(target, "PageVue", { foo: "bar" });
+		await vueAdapter.hydrate(target, Counter, { label: "a" });
 
-		expect(createSSRApp).toHaveBeenCalledTimes(1);
-		expect(createSSRApp.mock.calls[0]?.[0]).toBe("PageVue");
-		expect(createSSRApp.mock.calls[0]?.[1]).toEqual({ foo: "bar" });
-		expect(mount).toHaveBeenCalledWith(target);
+		// Hydration adopts the node the server rendered instead of replacing it.
+		expect(button(target)).toBe(ssrButton);
+		expect(warn.mock.calls.flat().join(" ")).not.toMatch(/mismatch/i);
 	});
 
-	it("update unmounts the previous app and creates a fresh SSR app for the new component", async () => {
-		const unmounts: unknown[] = [];
-		const mounts: unknown[] = [];
-		const createSSRApp = vi.fn((root: unknown, props: unknown) => ({
-			mount: (t: unknown) => {
-				mounts.push({ root, props, t });
-			},
-			unmount: () => {
-				unmounts.push({ root, props });
-			},
-		}));
-		vi.doMock("vue", () => ({ createSSRApp }));
+	it("keeps the component's state when the same page gets new props", async () => {
+		const target = await serverRendered({ label: "a" });
+		const handle = await vueAdapter.hydrate(target, Counter, { label: "a" });
 
-		const { vueAdapter } = await import(
-			"../../../../src/client/adapters/vue.js"
-		);
-		const target = defined(document.getElementById("app"));
-		const handle = await vueAdapter.hydrate(target, "A", { v: 1 });
-		handle.update("B", { v: 2 });
+		button(target).click();
+		await nextTick();
+		expect(button(target).textContent).toBe("a:1");
 
-		expect(createSSRApp).toHaveBeenCalledTimes(2);
-		expect(unmounts).toEqual([{ root: "A", props: { v: 1 } }]);
-		expect(mounts).toEqual([
-			{ root: "A", props: { v: 1 }, t: target },
-			{ root: "B", props: { v: 2 }, t: target },
-		]);
+		handle.update(Counter, { label: "b" });
+		await nextTick();
+		expect(button(target).textContent).toBe("b:1");
 	});
 
-	it("unmount calls app.unmount and clears state", async () => {
-		const unmount = vi.fn();
-		vi.doMock("vue", () => ({
-			createSSRApp: () => ({ mount: vi.fn(), unmount }),
-		}));
+	it("swaps in another page component", async () => {
+		const target = await serverRendered({ label: "a" });
+		const handle = await vueAdapter.hydrate(target, Counter, { label: "a" });
 
-		const { vueAdapter } = await import(
-			"../../../../src/client/adapters/vue.js"
-		);
-		const handle = await vueAdapter.hydrate(
-			defined(document.getElementById("app")),
-			"A",
-			{},
-		);
-		handle.unmount();
-		expect(unmount).toHaveBeenCalledTimes(1);
+		handle.update(Other, { label: "b" });
+		await nextTick();
+		expect(target.textContent).toBe("other b");
 	});
 
 	it("update() after unmount() is a no-op (no resurrect into a dead target)", async () => {
-		const createSSRApp = vi.fn(() => ({ mount: vi.fn(), unmount: vi.fn() }));
-		vi.doMock("vue", () => ({ createSSRApp }));
-		const { vueAdapter } = await import(
-			"../../../../src/client/adapters/vue.js"
-		);
-		const handle = await vueAdapter.hydrate(
-			defined(document.getElementById("app")),
-			"A",
-			{},
-		);
-		expect(createSSRApp).toHaveBeenCalledTimes(1); // initial hydrate
+		const target = await serverRendered({ label: "a" });
+		const handle = await vueAdapter.hydrate(target, Counter, { label: "a" });
 		handle.unmount();
-		// React/Svelte guard parity: a post-unmount update must not recreate the
-		// app into a torn-down target (audit 2026-06-13).
-		handle.update("B", { v: 2 });
-		expect(createSSRApp).toHaveBeenCalledTimes(1);
+		expect(target.innerHTML).toBe("");
+
+		handle.update(Other, { label: "b" });
+		await nextTick();
+		expect(target.innerHTML).toBe("");
 	});
 });

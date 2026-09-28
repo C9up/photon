@@ -1,7 +1,16 @@
 /**
  * Svelte 5 adapter — uses `hydrate(Component, { target, props })` from the
- * `svelte` package. On SPA navigation, `unmount()` the previous instance then
- * `hydrate()` (or `mount()` on a cleared target) the new one.
+ * `svelte` package.
+ *
+ * Given Photon's root (`@c9up/photon/svelte`, passed as `svelteRoot`), it
+ * hydrates the root and hands every later page to its `setPage`: the same page
+ * component keeps its state, another replaces it — what `App.svelte` does in
+ * `@inertiajs/svelte`. The root is passed in rather than imported here: this
+ * file is TypeScript that every Photon consumer typechecks, React and Vue ones
+ * included, and a `.svelte` import would break their build.
+ *
+ * Without a root it falls back to what it did before: on navigation, unmount
+ * the previous instance and mount the new one — state lost each time.
  *
  * Note: the project standardises on Svelte 5. Svelte 4's hydration shape
  * differs (`new Component({ target, props, hydrate: true })`) — if a v4 setup
@@ -28,8 +37,31 @@ interface SvelteModule {
 	unmount(instance: SvelteInstance): void;
 }
 
+/**
+ * The root's `setPage`, when `instance` is a mounted `PhotonRoot` — read off
+ * the component's exports rather than assumed.
+ */
+function setPageOf(
+	instance: SvelteInstance,
+):
+	| ((next: { component: unknown; props: Record<string, unknown> }) => void)
+	| undefined {
+	if (typeof instance !== "object" || instance === null) return undefined;
+	const setPage: unknown = Reflect.get(instance, "setPage");
+	return typeof setPage === "function"
+		? (next) => {
+				Reflect.apply(setPage, instance, [next]);
+			}
+		: undefined;
+}
+
 export const svelteAdapter: PhotonAdapter = {
-	async hydrate(target, Component, props): Promise<PhotonAdapterHandle> {
+	async hydrate(
+		target,
+		Component,
+		props,
+		options = {},
+	): Promise<PhotonAdapterHandle> {
 		// Literal import so the consumer's Vite bundles the Svelte 5 runtime.
 		const svelte: SvelteModule = await import("svelte");
 		if (
@@ -40,6 +72,32 @@ export const svelteAdapter: PhotonAdapter = {
 			throw new Error(
 				"svelte module is missing `hydrate` or `unmount`. Photon's Svelte adapter requires Svelte 5+.",
 			);
+		}
+
+		// With Photon's root the page lives in the root's state, and a change of
+		// props is an update of that state: the page component keeps its own.
+		const root = options.svelteRoot;
+		if (root !== undefined) {
+			let rootInstance: SvelteInstance | undefined = svelte.hydrate(root, {
+				target,
+				props: { component: Component, props },
+			});
+			const setPage = setPageOf(rootInstance);
+			if (setPage === undefined) {
+				throw new Error(
+					"svelteRoot does not export setPage(). Pass the root from `@c9up/photon/svelte`.",
+				);
+			}
+			return {
+				update(NextComponent, nextProps) {
+					if (rootInstance === undefined) return;
+					setPage({ component: NextComponent, props: nextProps });
+				},
+				unmount() {
+					if (rootInstance !== undefined) svelte.unmount(rootInstance);
+					rootInstance = undefined;
+				},
+			};
 		}
 
 		let instance: SvelteInstance | undefined = svelte.hydrate(Component, {

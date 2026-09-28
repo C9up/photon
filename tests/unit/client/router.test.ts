@@ -11,7 +11,11 @@ import {
 	type Mock,
 	vi,
 } from "vitest";
-import { hydrate } from "../../../src/client/hydrate.js";
+import {
+	hydrate,
+	router,
+	useInfiniteScrollData,
+} from "../../../src/client/hydrate.js";
 import type { ResolveComponent } from "../../../src/client/router.js";
 
 /** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
@@ -50,6 +54,7 @@ interface RouterTestState {
 
 async function bootHydratedReactPage(
 	initialUrl = "/start",
+	page: Record<string, unknown> = {},
 ): Promise<RouterTestState> {
 	const state: RouterTestState = {
 		reactHydrate: vi.fn<(target: Element, node: unknown) => void>(),
@@ -77,6 +82,7 @@ async function bootHydratedReactPage(
 			props: { x: 1 },
 			url: initialUrl,
 			framework: "react",
+			...page,
 		})}</script>
   `;
 
@@ -767,5 +773,866 @@ describe("photon/client > router — review hardenings (HIGH/MED patches)", () =
 			(c) => c[0] === "Fast",
 		);
 		expect(fastResolveCall).toBeDefined();
+	});
+});
+
+/** Record what the router assigns to `location.href`, reads still going through. */
+function spyOnHrefSetter(): {
+	hrefSetter: Mock<(value: unknown) => void>;
+	restore: () => void;
+} {
+	const hrefSetter = vi.fn<(value: unknown) => void>();
+	const originalLocation = window.location;
+	Object.defineProperty(window, "location", {
+		configurable: true,
+		value: new Proxy(originalLocation, {
+			get(target, prop) {
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+			set(target, prop, value) {
+				if (prop === "href") {
+					hrefSetter(value);
+					return true;
+				}
+				Reflect.set(target, prop, value);
+				return true;
+			},
+		}),
+	});
+	return {
+		hrefSetter,
+		restore: () =>
+			Object.defineProperty(window, "location", {
+				configurable: true,
+				value: originalLocation,
+			}),
+	};
+}
+
+function sentHeader(
+	init: RequestInit | undefined,
+	name: string,
+): string | undefined {
+	const headers = init?.headers;
+	if (
+		headers === undefined ||
+		headers instanceof Headers ||
+		Array.isArray(headers)
+	) {
+		return undefined;
+	}
+	return headers[name];
+}
+
+describe("photon/client > router — asset versioning", () => {
+	it("echoes the version it was served, then the one each page brings", async () => {
+		await bootHydratedReactPage("/start", { version: "v1" });
+		const fetchMock = vi.fn(
+			async (_url: string, _init?: RequestInit) =>
+				new Response(
+					JSON.stringify({
+						component: "Orders",
+						props: {},
+						url: "/orders",
+						framework: "react",
+						version: "v2",
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		dispatchClick(createAnchor({ href: "/orders" }));
+		await waitFor(() => fetchMock.mock.calls.length === 1, "first fetch");
+		expect(sentHeader(fetchMock.mock.calls[0]?.[1], "x-photon-version")).toBe(
+			"v1",
+		);
+
+		await new Promise((r) => setTimeout(r, 0));
+		dispatchClick(createAnchor({ href: "/orders?page=2" }));
+		await waitFor(() => fetchMock.mock.calls.length === 2, "second fetch");
+		expect(sentHeader(fetchMock.mock.calls[1]?.[1], "x-photon-version")).toBe(
+			"v2",
+		);
+	});
+
+	it("follows a 409 to the location the server names", async () => {
+		await bootHydratedReactPage("/start", { version: "v1" });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response("", {
+						status: 409,
+						headers: { "x-photon-location": "https://sso.example/login" },
+					}),
+			),
+		);
+		const { hrefSetter, restore } = spyOnHrefSetter();
+		try {
+			dispatchClick(createAnchor({ href: "/account" }));
+			await waitFor(() => hrefSetter.mock.calls.length > 0, "the 409 reload");
+			expect(hrefSetter).toHaveBeenCalledWith("https://sso.example/login");
+		} finally {
+			restore();
+		}
+	});
+
+	it("never follows a 409 to a script URL", async () => {
+		await bootHydratedReactPage();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response("", {
+						status: 409,
+						headers: { "x-photon-location": "javascript:alert(1)" },
+					}),
+			),
+		);
+		const { hrefSetter, restore } = spyOnHrefSetter();
+		try {
+			dispatchClick(createAnchor({ href: "/account" }));
+			await waitFor(() => hrefSetter.mock.calls.length > 0, "the 409 reload");
+			expect(hrefSetter).toHaveBeenCalledWith("/account");
+		} finally {
+			restore();
+		}
+	});
+});
+
+/** Count `location.reload()` calls, everything else going to the real Location. */
+function spyOnReload(): { reload: Mock<() => void>; restore: () => void } {
+	const reload = vi.fn<() => void>();
+	const originalLocation = window.location;
+	Object.defineProperty(window, "location", {
+		configurable: true,
+		// An empty target: `reload` is a non-configurable own property of the
+		// real Location, and a proxy over it may not report another value.
+		value: new Proxy(
+			{},
+			{
+				get(_target, prop) {
+					if (prop === "reload") return reload;
+					const value = Reflect.get(originalLocation, prop, originalLocation);
+					return typeof value === "function"
+						? value.bind(originalLocation)
+						: value;
+				},
+			},
+		),
+	});
+	return {
+		reload,
+		restore: () =>
+			Object.defineProperty(window, "location", {
+				configurable: true,
+				value: originalLocation,
+			}),
+	};
+}
+
+describe("photon/client > router — encrypted history", () => {
+	afterEach(() => {
+		sessionStorage.clear();
+	});
+
+	it("pushes a page that asks for encryption as ciphertext", async () => {
+		await bootHydratedReactPage();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							component: "Account",
+							props: { iban: "CH93 0076" },
+							url: "/account",
+							framework: "react",
+							encryptHistory: true,
+						}),
+						{ status: 200, headers: { "content-type": "application/json" } },
+					),
+			),
+		);
+		const pushState = vi.spyOn(history, "pushState");
+		dispatchClick(createAnchor({ href: "/account" }));
+		await waitFor(() => pushState.mock.calls.length > 0, "the pushState");
+		const state: unknown = pushState.mock.calls[0]?.[0];
+		expect(
+			typeof state === "object" && state !== null && "photonEncrypted" in state,
+		).toBe(true);
+		expect(JSON.stringify(state)).not.toContain("CH93");
+	});
+
+	it("renders an encrypted entry again while its key is there", async () => {
+		const state = await bootHydratedReactPage("/account", {
+			props: { iban: "CH93 0076" },
+			encryptHistory: true,
+		});
+		const sealed: unknown = history.state;
+		window.dispatchEvent(new PopStateEvent("popstate", { state: sealed }));
+		await waitFor(
+			() => state.reactRender.mock.calls.length > 0,
+			"the render from history",
+		);
+		expect(JSON.stringify(state.reactRender.mock.calls[0])).toContain("CH93");
+	});
+
+	it("reloads from the server when the back button meets a cleared entry", async () => {
+		const state = await bootHydratedReactPage("/account", {
+			props: { iban: "CH93 0076" },
+			encryptHistory: true,
+		});
+		const sealed: unknown = history.state;
+		expect(JSON.stringify(sealed)).not.toContain("CH93");
+		// Logout: a page carrying clearHistory drops the key.
+		sessionStorage.clear();
+
+		const { reload, restore } = spyOnReload();
+		try {
+			window.dispatchEvent(new PopStateEvent("popstate", { state: sealed }));
+			await waitFor(() => reload.mock.calls.length > 0, "the reload");
+			expect(state.reactRender).not.toHaveBeenCalled();
+		} finally {
+			restore();
+		}
+	});
+
+	it("reloads a page the back-forward cache restores once its entry is unreadable", async () => {
+		await bootHydratedReactPage("/account", { encryptHistory: true });
+		sessionStorage.clear();
+		const { reload, restore } = spyOnReload();
+		try {
+			window.dispatchEvent(
+				new PageTransitionEvent("pageshow", { persisted: true }),
+			);
+			await waitFor(() => reload.mock.calls.length > 0, "the reload");
+		} finally {
+			restore();
+		}
+	});
+
+	it("drops the key when the first page loaded carries clearHistory", async () => {
+		sessionStorage.setItem("photon:history-key", JSON.stringify([1, 2, 3]));
+		await bootHydratedReactPage("/login", { clearHistory: true });
+		expect(sessionStorage.getItem("photon:history-key")).toBeNull();
+	});
+});
+
+/** A JSON page response, as the server sends a partial reload. */
+function pageResponse(page: Record<string, unknown>): Response {
+	return new Response(JSON.stringify({ framework: "react", ...page }), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+describe("photon/client > router — deferred props", () => {
+	it("asks for each group once the page is up, and merges what comes back", async () => {
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			const only = sentHeader(init, "x-photon-partial-data");
+			if (only === "stats,chart") {
+				return pageResponse({
+					component: "Home",
+					url: "/start",
+					props: { stats: 42, chart: [1, 2], errors: { wiped: "no" } },
+				});
+			}
+			return pageResponse({
+				component: "Home",
+				url: "/start",
+				props: { logs: ["boot"] },
+			});
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const state = await bootHydratedReactPage("/start", {
+			props: { x: 1, errors: { email: "required" } },
+			deferredProps: { panels: ["stats", "chart"], audit: ["logs"] },
+		});
+		await waitFor(
+			() => state.reactRender.mock.calls.length === 2,
+			"both deferred groups rendered",
+		);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		for (const [url, init] of fetchMock.mock.calls) {
+			expect(url).toBe("/start");
+			expect(sentHeader(init, "x-photon")).toBe("true");
+			expect(sentHeader(init, "x-photon-partial-component")).toBe("Home");
+		}
+		const last = JSON.stringify(state.reactRender.mock.calls.at(-1));
+		expect(last).toContain('"stats":42');
+		expect(last).toContain('"logs":["boot"]');
+		expect(last).toContain('"x":1');
+		// The form's errors are the page's, not the background request's.
+		expect(last).toContain('"email":"required"');
+		expect(last).not.toContain("wiped");
+	});
+
+	it("does not ask again for a group the page already holds", async () => {
+		const fetchMock = vi.fn(async () =>
+			pageResponse({ component: "Home", url: "/start", props: {} }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage("/start", {
+			props: { stats: 1 },
+			deferredProps: { panels: ["stats"] },
+		});
+		await new Promise((r) => setTimeout(r, 0));
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("drops a group that arrives after the user has moved on", async () => {
+		let release: (() => void) | undefined;
+		const deferred = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+			if (sentHeader(init, "x-photon-partial-data") !== undefined) {
+				await deferred;
+				return pageResponse({
+					component: "Home",
+					url: "/start",
+					props: { stats: 42 },
+				});
+			}
+			return pageResponse({ component: "Orders", url, props: {} });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const state = await bootHydratedReactPage("/start", {
+			deferredProps: { panels: ["stats"] },
+		});
+		dispatchClick(createAnchor({ href: "/orders" }));
+		await waitFor(
+			() => state.reactRender.mock.calls.length === 1,
+			"the navigation",
+		);
+		release?.();
+		await new Promise((r) => setTimeout(r, 10));
+
+		expect(state.reactRender).toHaveBeenCalledTimes(1);
+		expect(JSON.stringify(state.reactRender.mock.calls[0])).not.toContain(
+			"stats",
+		);
+	});
+
+	it("lets the other groups arrive when one fails", async () => {
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (_url: string, init?: RequestInit) =>
+				sentHeader(init, "x-photon-partial-data") === "broken"
+					? new Response("", { status: 500 })
+					: pageResponse({
+							component: "Home",
+							url: "/start",
+							props: { fine: true },
+						}),
+			),
+		);
+		const state = await bootHydratedReactPage("/start", {
+			deferredProps: { a: ["broken"], b: ["fine"] },
+		});
+		await waitFor(
+			() => state.reactRender.mock.calls.length === 1,
+			"the healthy group",
+		);
+		expect(JSON.stringify(state.reactRender.mock.calls[0])).toContain(
+			'"fine":true',
+		);
+		expect(errSpy).toHaveBeenCalled();
+	});
+});
+
+describe("photon/client > router — visit and reload", () => {
+	it("reload({ only }) asks for those props and merges them in place", async () => {
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({
+				component: "Home",
+				url: "/start",
+				props: { stats: 2, errors: { email: "taken" } },
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const state = await bootHydratedReactPage("/start", {
+			props: { x: 1, stats: 1, errors: {} },
+		});
+		const pushState = vi.spyOn(history, "pushState");
+		const replaceState = vi.spyOn(history, "replaceState");
+
+		await router.reload({ only: ["stats"] });
+
+		const init = fetchMock.mock.calls[0]?.[1];
+		expect(fetchMock.mock.calls[0]?.[0]).toBe("/start");
+		expect(sentHeader(init, "x-photon-partial-component")).toBe("Home");
+		expect(sentHeader(init, "x-photon-partial-data")).toBe("stats");
+		expect(sentHeader(init, "cache-control")).toBe("no-cache");
+		const rendered = JSON.stringify(state.reactRender.mock.calls.at(-1));
+		expect(rendered).toContain('"stats":2');
+		expect(rendered).toContain('"x":1');
+		// An explicit reload takes the server's errors, unlike a deferred group.
+		expect(rendered).toContain('"email":"taken"');
+		expect(pushState).not.toHaveBeenCalled();
+		expect(replaceState).toHaveBeenCalled();
+	});
+
+	it("reload({ reset }) asks for the prop and says to replace it", async () => {
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({ component: "Home", url: "/start", props: { rows: [] } }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage("/start", { props: { rows: [1, 2] } });
+
+		await router.reload({ only: ["stats"], reset: ["rows"] });
+
+		const init = fetchMock.mock.calls[0]?.[1];
+		expect(sentHeader(init, "x-photon-partial-data")).toBe("stats,rows");
+		expect(sentHeader(init, "x-photon-reset")).toBe("rows");
+	});
+
+	it("reload() without props reloads the whole page in place", async () => {
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({ component: "Home", url: "/start", props: { x: 2 } }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const state = await bootHydratedReactPage("/start");
+		const pushState = vi.spyOn(history, "pushState");
+
+		await router.reload();
+
+		expect(
+			sentHeader(fetchMock.mock.calls[0]?.[1], "x-photon-partial-component"),
+		).toBeUndefined();
+		expect(JSON.stringify(state.reactRender.mock.calls.at(-1))).toContain(
+			'"x":2',
+		);
+		expect(pushState).not.toHaveBeenCalled();
+	});
+
+	it("visit() navigates like a link, and replace swaps the history entry", async () => {
+		const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+			pageResponse({ component: "Orders", url, props: {} }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage("/start");
+		const pushState = vi.spyOn(history, "pushState");
+		const replaceState = vi.spyOn(history, "replaceState");
+
+		await router.visit("/orders");
+		expect(pushState).toHaveBeenCalledTimes(1);
+
+		await router.visit("/orders?page=2", { replace: true, errorBag: "login" });
+		expect(pushState).toHaveBeenCalledTimes(1);
+		expect(replaceState.mock.calls.at(-1)?.[2]).toBe("/orders?page=2");
+		expect(sentHeader(fetchMock.mock.calls[1]?.[1], "x-photon-error-bag")).toBe(
+			"login",
+		);
+	});
+
+	it("visit() to another origin is a full navigation", async () => {
+		vi.stubGlobal("fetch", vi.fn());
+		await bootHydratedReactPage();
+		const { hrefSetter, restore } = spyOnHrefSetter();
+		try {
+			await router.visit("https://elsewhere.example/x");
+			expect(hrefSetter).toHaveBeenCalledWith("https://elsewhere.example/x");
+		} finally {
+			restore();
+		}
+	});
+});
+
+describe("photon/client > router — merged props", () => {
+	it("appends the next slice of a merge prop instead of replacing the list", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				pageResponse({
+					component: "Home",
+					url: "/start",
+					props: { rows: [{ id: 2 }, { id: 3 }] },
+					mergeProps: ["rows"],
+					matchPropsOn: ["rows.id"],
+				}),
+			),
+		);
+		const state = await bootHydratedReactPage("/start", {
+			props: { rows: [{ id: 1 }, { id: 2 }] },
+		});
+
+		await router.reload({ only: ["rows"] });
+
+		expect(JSON.stringify(state.reactRender.mock.calls.at(-1))).toContain(
+			'"rows":[{"id":1},{"id":2},{"id":3}]',
+		);
+	});
+
+	it("replaces a merge prop on a full visit", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				pageResponse({
+					component: "Home",
+					url: "/start",
+					props: { rows: [{ id: 9 }] },
+					mergeProps: ["rows"],
+				}),
+			),
+		);
+		const state = await bootHydratedReactPage("/start", {
+			props: { rows: [{ id: 1 }] },
+		});
+
+		await router.reload();
+
+		expect(JSON.stringify(state.reactRender.mock.calls.at(-1))).toContain(
+			'"rows":[{"id":9}]',
+		);
+	});
+});
+
+describe("photon/client > router — once props", () => {
+	it("tells the server what it holds, and keeps it when the server skips it", async () => {
+		const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+			pageResponse({
+				component: "Signup",
+				url,
+				props: { step: 2 },
+				onceProps: { countries: { prop: "countries", expiresAt: null } },
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const state = await bootHydratedReactPage("/start", {
+			props: { countries: ["CH", "FR"] },
+			onceProps: { countries: { prop: "countries", expiresAt: null } },
+		});
+
+		await router.visit("/signup");
+
+		expect(
+			sentHeader(fetchMock.mock.calls[0]?.[1], "x-photon-except-once-props"),
+		).toBe("countries");
+		const rendered = JSON.stringify(state.reactRender.mock.calls.at(-1));
+		expect(rendered).toContain('"countries":["CH","FR"]');
+		expect(rendered).toContain('"step":2');
+	});
+});
+
+describe("photon/client > router — flash", () => {
+	function listen(): Array<unknown> {
+		const seen: unknown[] = [];
+		document.addEventListener("photon:flash", (event) => {
+			if (event instanceof CustomEvent) seen.push(event.detail);
+		});
+		return seen;
+	}
+
+	it("announces the first page's flash once it is up", async () => {
+		const seen = listen();
+		vi.stubGlobal("fetch", vi.fn());
+		await bootHydratedReactPage("/start", { flash: { success: "Saved" } });
+		await waitFor(() => seen.length > 0, "the flash event");
+		expect(seen).toEqual([{ flash: { success: "Saved" } }]);
+	});
+
+	it("announces a visit's flash, and never stores it in history", async () => {
+		const seen = listen();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) =>
+				pageResponse({
+					component: "Orders",
+					url,
+					props: {},
+					flash: { success: "Created" },
+				}),
+			),
+		);
+		await bootHydratedReactPage();
+		const pushState = vi.spyOn(history, "pushState");
+
+		await router.visit("/orders");
+
+		expect(seen).toEqual([{ flash: { success: "Created" } }]);
+		expect(JSON.stringify(pushState.mock.calls[0]?.[0])).not.toContain(
+			"Created",
+		);
+	});
+
+	it("stays quiet for a deferred group and an empty bag", async () => {
+		const seen = listen();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				pageResponse({
+					component: "Home",
+					url: "/start",
+					props: { stats: 1 },
+					flash: { success: "again" },
+				}),
+			),
+		);
+		const state = await bootHydratedReactPage("/start", {
+			flash: {},
+			deferredProps: { panels: ["stats"] },
+		});
+		await waitFor(
+			() => state.reactRender.mock.calls.length > 0,
+			"the deferred group",
+		);
+		await new Promise((r) => setTimeout(r, 0));
+		expect(seen).toEqual([]);
+	});
+});
+
+describe("photon/client > infinite scroll data", () => {
+	const cursor = (
+		currentPage: number,
+		nextPage: number | null,
+		previousPage: number | null,
+		reset = false,
+	) => ({ pageName: "page", currentPage, nextPage, previousPage, reset });
+
+	it("loads the next page into the list and stops at the last one", async () => {
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({
+				component: "Users",
+				url: "/users?page=3",
+				props: { users: { data: [5, 6] } },
+				mergeProps: ["users.data"],
+				scrollProps: { users: cursor(3, null, 2) },
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const state = await bootHydratedReactPage("/users", {
+			component: "Users",
+			props: { users: { data: [3, 4] } },
+			scrollProps: { users: cursor(2, 3, 1) },
+		});
+		const replaceState = vi.spyOn(history, "replaceState");
+		const scroll = useInfiniteScrollData({ getPropName: () => "users" });
+		expect(scroll.hasNext()).toBe(true);
+		expect(scroll.hasPrevious()).toBe(true);
+
+		await scroll.fetchNext();
+
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe("/users?page=3");
+		expect(sentHeader(init, "x-photon-partial-data")).toBe("users");
+		expect(sentHeader(init, "x-photon-infinite-scroll-merge-intent")).toBe(
+			"append",
+		);
+		expect(JSON.stringify(state.reactRender.mock.calls.at(-1))).toContain(
+			'"data":[3,4,5,6]',
+		);
+		// The address bar stays where the user is.
+		expect(replaceState.mock.calls.at(-1)?.[2]).toBe("/users");
+		expect(scroll.getLastLoadedPage()).toBe(3);
+		expect(scroll.getRequestCount()).toBe(1);
+		expect(scroll.hasNext()).toBe(false);
+		expect(scroll.hasPrevious()).toBe(true);
+
+		await scroll.fetchNext();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("puts the previous page before the rows shown", async () => {
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({
+				component: "Users",
+				url: "/users?page=1",
+				props: { users: { data: [1, 2] } },
+				prependProps: ["users.data"],
+				scrollProps: { users: cursor(1, 2, null) },
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const state = await bootHydratedReactPage("/users?page=2", {
+			component: "Users",
+			props: { users: { data: [3, 4] } },
+			scrollProps: { users: cursor(2, 3, 1) },
+		});
+		const scroll = useInfiniteScrollData({ getPropName: () => "users" });
+
+		await scroll.fetchPrevious();
+
+		const [url, init] = fetchMock.mock.calls[0] ?? [];
+		expect(url).toBe("/users?page=1");
+		expect(sentHeader(init, "x-photon-infinite-scroll-merge-intent")).toBe(
+			"prepend",
+		);
+		expect(JSON.stringify(state.reactRender.mock.calls.at(-1))).toContain(
+			'"data":[1,2,3,4]',
+		);
+		expect(scroll.hasPrevious()).toBe(false);
+		expect(scroll.hasNext()).toBe(true);
+	});
+
+	it("asks once while a page is loading", async () => {
+		const fetchMock = vi.fn(async () =>
+			pageResponse({
+				component: "Users",
+				url: "/users",
+				props: { users: { data: [] } },
+				scrollProps: { users: cursor(2, null, 1) },
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage("/users", {
+			component: "Users",
+			props: { users: { data: [] } },
+			scrollProps: { users: cursor(1, 2, null) },
+		});
+		const scroll = useInfiniteScrollData({ getPropName: () => "users" });
+		await Promise.all([scroll.fetchNext(), scroll.fetchNext()]);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("starts over when the server says the list was reset", async () => {
+		const fetchMock = vi.fn(async () =>
+			pageResponse({
+				component: "Users",
+				url: "/users",
+				props: { users: { data: [9] } },
+				scrollProps: { users: cursor(1, 2, null, true) },
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage("/users", {
+			component: "Users",
+			props: { users: { data: [1] } },
+			scrollProps: { users: cursor(5, null, 4) },
+		});
+		const onReset = vi.fn();
+		const scroll = useInfiniteScrollData({
+			getPropName: () => "users",
+			onReset,
+		});
+		expect(scroll.hasNext()).toBe(false);
+
+		await router.reload({ reset: ["users"] });
+
+		expect(scroll.hasNext()).toBe(true);
+		expect(scroll.getLastLoadedPage()).toBe(1);
+		expect(onReset).toHaveBeenCalledTimes(1);
+	});
+
+	it("says which scroll prop is missing", async () => {
+		vi.stubGlobal("fetch", vi.fn());
+		await bootHydratedReactPage();
+		expect(() => useInfiniteScrollData({ getPropName: () => "users" })).toThrow(
+			/scroll prop named "users"/,
+		);
+	});
+});
+
+describe("photon/client > router — events, callbacks, remember", () => {
+	it("announces every visit that reached the screen, until unsubscribed", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) =>
+				pageResponse({ component: "Orders", url, props: {} }),
+			),
+		);
+		await bootHydratedReactPage();
+		const seen: string[] = [];
+		const off = router.on("success", (event) => {
+			seen.push(event.detail.page.url);
+		});
+		await router.visit("/orders");
+		off();
+		await router.visit("/orders?page=2");
+		expect(seen).toEqual(["/orders"]);
+	});
+
+	it("runs the visit callbacks, and onBefore can cancel", async () => {
+		const fetchMock = vi.fn(async (url: string) =>
+			pageResponse({ component: "Orders", url, props: {} }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage();
+		const calls: string[] = [];
+
+		await router.visit("/orders", { onBefore: () => false });
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		await router.visit("/orders", {
+			onBefore: () => {
+				calls.push("before");
+				return undefined;
+			},
+			onBeforeUpdate: () => calls.push("beforeUpdate"),
+			onSuccess: (page) => calls.push(`success ${page.url}`),
+			onFinish: ({ completed }) => calls.push(`finish ${completed}`),
+		});
+		expect(calls).toEqual([
+			"before",
+			"beforeUpdate",
+			"success /orders",
+			"finish true",
+		]);
+	});
+
+	it("reports an unfinished partial reload to onFinish", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response("", { status: 500 })),
+		);
+		await bootHydratedReactPage();
+		const onFinish = vi.fn();
+		await router.reload({ only: ["x"], onFinish });
+		expect(onFinish).toHaveBeenCalledWith({ url: "/start", completed: false });
+	});
+
+	it("remembers state in the history entry, and keeps it across a reload of the tab", async () => {
+		vi.stubGlobal("fetch", vi.fn());
+		await bootHydratedReactPage("/start");
+		router.remember({ tab: "billing" }, "settings");
+		expect(router.restore("settings")).toEqual({ tab: "billing" });
+		await waitFor(
+			() => JSON.stringify(history.state).includes("billing"),
+			"the history entry",
+		);
+
+		// The tab reloads: the same page is served again, and hydrates over the
+		// entry the previous load left behind.
+		const entry: unknown = history.state;
+		document.documentElement.innerHTML = "";
+		history.replaceState(entry, "", "/start");
+		await bootHydratedReactPage("/start");
+		expect(router.restore("settings")).toEqual({ tab: "billing" });
+	});
+
+	it("does not carry remembered state to another page", async () => {
+		vi.stubGlobal("fetch", vi.fn());
+		await bootHydratedReactPage("/start");
+		router.remember(1, "k");
+		await waitFor(
+			() => JSON.stringify(history.state).includes("rememberedState"),
+			"the history entry",
+		);
+		await bootHydratedReactPage("/elsewhere");
+		expect(router.restore("k")).toBeUndefined();
+	});
+
+	it("replace() moves the address without a request, same origin only", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage("/users");
+		const replaceState = vi.spyOn(history, "replaceState");
+
+		router.replace({ url: "/users?page=3" });
+		await waitFor(() => replaceState.mock.calls.length > 0, "the replace");
+		expect(replaceState.mock.calls.at(-1)?.[2]).toBe("/users?page=3");
+
+		router.replace({ url: "https://elsewhere.example/x" });
+		await new Promise((r) => setTimeout(r, 0));
+		expect(replaceState).toHaveBeenCalledTimes(1);
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

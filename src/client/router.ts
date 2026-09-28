@@ -19,7 +19,18 @@
 import type { MetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { applyMetaToDom } from "./applyMeta.js";
-import type { ClientFramework, PhotonPageData } from "./hydrate.js";
+import { isPhotonState, readHistoryState, toHistoryState } from "./history.js";
+import type {
+	ClientFramework,
+	PhotonPageData,
+	ScrollPropMeta,
+} from "./hydrate.js";
+import {
+	heldOnceKeys,
+	mergePartialProps,
+	type OncePropMeta,
+	restoreOnceProps,
+} from "./mergeProps.js";
 
 export type ResolveComponent = (name: string) => Promise<{ default: unknown }>;
 
@@ -27,6 +38,8 @@ export interface BootRouterOptions {
 	target: Element;
 	adapter: PhotonAdapterHandle;
 	resolveComponent: ResolveComponent;
+	/** The page being hydrated: its version, and the deferred groups it owes. */
+	page?: PhotonPageData;
 }
 
 const SUPPORTED_FRAMEWORKS: readonly ClientFramework[] = [
@@ -36,6 +49,46 @@ const SUPPORTED_FRAMEWORKS: readonly ClientFramework[] = [
 ];
 
 const PHOTON_HEADER = "x-photon";
+const VERSION_HEADER = "x-photon-version";
+const LOCATION_HEADER = "x-photon-location";
+
+/**
+ * The asset version of the page on screen, echoed on every navigation.
+ *
+ * The server compares it with the build it runs and answers a mismatch with a
+ * 409, so a tab left open across a deploy reloads instead of fetching props for
+ * JavaScript it no longer has. The router never sent it, so the server treated
+ * every client as one that does not speak versioning and the check never fired.
+ */
+let currentVersion: string | undefined;
+
+/** The page on screen, as last applied — what deferred props are merged into. */
+let currentPage: PhotonPageData | undefined;
+
+const PARTIAL_COMPONENT_HEADER = "x-photon-partial-component";
+const PARTIAL_DATA_HEADER = "x-photon-partial-data";
+const PARTIAL_EXCEPT_HEADER = "x-photon-partial-except";
+const RESET_HEADER = "x-photon-reset";
+const ERROR_BAG_HEADER = "x-photon-error-bag";
+const EXCEPT_ONCE_HEADER = "x-photon-except-once-props";
+
+/**
+ * The `once` props the page on screen holds, as a header: the server skips
+ * resolving them and the client puts its copy back ({@link withOnceProps}).
+ */
+function exceptOnceHeader(): Record<string, string> {
+	return listHeader(
+		EXCEPT_ONCE_HEADER,
+		currentPage === undefined ? [] : heldOnceKeys(currentPage, Date.now()),
+	);
+}
+
+/** `page` with the `once` values it was not sent restored from the one on screen. */
+function withOnceProps(page: PhotonPageData): PhotonPageData {
+	if (currentPage === undefined) return page;
+	const restored = restoreOnceProps(page, currentPage);
+	return restored === page ? page : { ...page, ...restored };
+}
 
 /**
  * Module-level "current options" slot. The click + popstate listeners are
@@ -69,6 +122,9 @@ export function bootRouter(options: BootRouterOptions): void {
 	}
 
 	activeOptions = options;
+	currentVersion = options.page?.version;
+	currentPage = options.page;
+	if (options.page !== undefined) loadDeferredProps(options.page, options);
 
 	if (listenersInstalled) return;
 	listenersInstalled = true;
@@ -81,6 +137,10 @@ export function bootRouter(options: BootRouterOptions): void {
 	window.addEventListener("popstate", (event) => {
 		if (!activeOptions) return;
 		void handlePopState(event, activeOptions);
+	});
+
+	window.addEventListener("pageshow", (event) => {
+		void handlePageShow(event);
 	});
 }
 
@@ -176,36 +236,74 @@ function isSafeNavigationUrl(url: string): boolean {
 async function navigate(
 	targetPath: string,
 	options: BootRouterOptions,
+	visitOptions: VisitOptions = {},
 ): Promise<void> {
+	if (visitOptions.onBefore?.({ url: targetPath }) === false) return;
+	let completed = false;
+	try {
+		completed = await fetchAndApply(targetPath, options, visitOptions);
+	} finally {
+		visitOptions.onFinish?.({ url: targetPath, completed });
+	}
+}
+
+/** A navigation's request and swap; true once the new page is on screen. */
+async function fetchAndApply(
+	targetPath: string,
+	options: BootRouterOptions,
+	visitOptions: VisitOptions,
+): Promise<boolean> {
 	const ownSeq = ++navigationSeq;
 
 	let response: Response;
 	try {
 		response = await fetch(targetPath, {
-			headers: { [PHOTON_HEADER]: "true" },
+			headers: {
+				...visitOptions.headers,
+				...exceptOnceHeader(),
+				[PHOTON_HEADER]: "true",
+				...(visitOptions.errorBag !== undefined && visitOptions.errorBag !== ""
+					? { [ERROR_BAG_HEADER]: visitOptions.errorBag }
+					: {}),
+				...(currentVersion !== undefined
+					? { [VERSION_HEADER]: currentVersion }
+					: {}),
+			},
 			credentials: "same-origin",
 		});
 	} catch (err) {
 		// Network failure — fall back to a real navigation rather than swallow.
 		// Skip the fallback if a newer nav started in the meantime.
-		if (ownSeq !== navigationSeq) return;
+		if (ownSeq !== navigationSeq) return false;
 		console.error(
 			"[photon] SPA-nav fetch failed; falling back to full reload.",
 			err,
 		);
 		fallbackToFullReload(targetPath);
-		return;
+		return false;
 	}
 
 	// Stale response — a newer nav has already started; drop on the floor.
-	if (ownSeq !== navigationSeq) return;
+	if (ownSeq !== navigationSeq) return false;
+
+	// The server asking for a real navigation: a stale asset version, or an
+	// explicit `location()` — which may leave the site, as upstream's may. It
+	// used to be read as any other failure, so an external `location()` reloaded
+	// the page the user was leaving instead of going where the server said.
+	if (response.status === 409) {
+		const target = response.headers.get(LOCATION_HEADER);
+		fallbackToFullReload(
+			target !== null && isHttpUrl(target) ? target : targetPath,
+		);
+		return false;
+	}
 
 	if (!response.ok) {
 		console.error(
 			`[photon] SPA-nav returned HTTP ${response.status}; falling back to full reload.`,
 		);
 		fallbackToFullReload(targetPath);
-		return;
+		return false;
 	}
 
 	const contentType = response.headers.get("content-type") ?? "";
@@ -213,7 +311,7 @@ async function navigate(
 		// Server returned a full SSR page (or something else). Full reload preserves
 		// the user's intent without trying to interpret HTML as page-data.
 		fallbackToFullReload(targetPath);
-		return;
+		return false;
 	}
 
 	let payload: unknown;
@@ -225,20 +323,33 @@ async function navigate(
 			err,
 		);
 		fallbackToFullReload(targetPath);
-		return;
+		return false;
 	}
 
 	// Re-check after every async boundary — `response.json()` may have yielded
 	// to the event loop long enough for a fresher click to overtake.
-	if (ownSeq !== navigationSeq) return;
+	if (ownSeq !== navigationSeq) return false;
 
-	const newPageData = parsePageData(payload);
-	if (!newPageData) {
+	const parsed = parsePageData(payload);
+	if (!parsed) {
 		fallbackToFullReload(targetPath);
-		return;
+		return false;
 	}
+	const newPageData = withOnceProps(parsed);
 
-	await applyPageData(newPageData, options, /* fromHistory */ false, ownSeq);
+	visitOptions.onBeforeUpdate?.(newPageData);
+	await applyPageData(
+		newPageData,
+		options,
+		/* fromHistory */ false,
+		ownSeq,
+		visitOptions.replace === true,
+	);
+	if (ownSeq !== navigationSeq || currentPage === undefined) return false;
+	visitOptions.onSuccess?.(currentPage);
+	announceSuccess(currentPage);
+	announceFlash(newPageData.flash);
+	return true;
 }
 
 async function applyPageData(
@@ -246,6 +357,7 @@ async function applyPageData(
 	options: BootRouterOptions,
 	fromHistory: boolean,
 	expectedSeq?: number,
+	replace = false,
 ): Promise<void> {
 	// Reject server-supplied URLs that would navigate cross-origin or to a
 	// non-http(s) scheme. Without this guard a buggy/malicious SSR could poison
@@ -281,6 +393,9 @@ async function applyPageData(
 	// arrived while resolveComponent was awaiting.
 	if (expectedSeq !== undefined && expectedSeq !== navigationSeq) return;
 
+	if (pageData.version !== undefined) currentVersion = pageData.version;
+	currentPage = pageData;
+
 	try {
 		options.adapter.update(mod.default, pageData.props);
 	} catch (err) {
@@ -315,13 +430,18 @@ async function applyPageData(
 		// stack a duplicate. Repeated clicks on the same link otherwise inflate
 		// history with redundant entries (back-button UX degrades).
 		const sameUrl =
-			typeof location !== "undefined" &&
-			resolvedSameUrl(pageData.url, location.href);
+			replace ||
+			(typeof location !== "undefined" &&
+				resolvedSameUrl(pageData.url, location.href));
+		// Encrypted when the page asks for it — which takes a turn of the event
+		// loop, so a newer navigation may have pushed its own entry meanwhile.
+		const state = await toHistoryState(pageData);
+		if (expectedSeq !== undefined && expectedSeq !== navigationSeq) return;
 		try {
 			if (sameUrl && typeof history.replaceState === "function") {
-				history.replaceState({ photonData: pageData }, "", pageData.url);
+				history.replaceState(state, "", pageData.url);
 			} else {
-				history.pushState({ photonData: pageData }, "", pageData.url);
+				history.pushState(state, "", pageData.url);
 			}
 		} catch (err) {
 			// Same-origin pushState should never throw under normal use; log and continue.
@@ -331,7 +451,457 @@ async function applyPageData(
 			);
 		}
 	}
+
+	loadDeferredProps(pageData, options);
 }
+
+/**
+ * Ask for every deferred group the page still lacks, one partial reload per
+ * group, so a slow group does not hold the others back.
+ *
+ * `defer()` sends the NAME of a prop and not its value; the value only ever
+ * arrives through this request. The router never made it, so a deferred panel
+ * stayed empty forever. Only the props not already held are asked for: a page
+ * restored from history may carry some groups already.
+ */
+function loadDeferredProps(
+	page: PhotonPageData,
+	options: BootRouterOptions,
+): void {
+	const seq = navigationSeq;
+	for (const props of Object.values(page.deferredProps ?? {})) {
+		const missing = props.filter((name) => !(name in page.props));
+		if (missing.length > 0) {
+			void fetchPartial(
+				page,
+				page.url,
+				{ only: missing, preserveErrors: true, preserveUrl: true },
+				options,
+				seq,
+				{ background: true },
+			);
+		}
+	}
+}
+
+/**
+ * The visit callbacks, under `@inertiajs/core`'s names — the subset a GET visit
+ * reaches. `onBefore` returning false cancels the visit.
+ */
+export interface VisitCallbacks {
+	onBefore?(visit: { url: string }): boolean | undefined;
+	/** The answer is in and about to replace what is on screen. */
+	onBeforeUpdate?(page: PhotonPageData): void;
+	onSuccess?(page: PhotonPageData): void;
+	/** Always last: `completed` is false when the visit was dropped or failed. */
+	onFinish?(visit: { url: string; completed: boolean }): void;
+}
+
+/** Which props a partial reload asks for, drops, or wants replaced whole. */
+export interface PartialRequest extends VisitCallbacks {
+	/** Only these props are resolved; the rest keep their current value. */
+	only?: string[];
+	/** Every prop but these is resolved. */
+	except?: string[];
+	/** These are replaced rather than combined with what the client holds. */
+	reset?: string[];
+	/** Extra request headers. */
+	headers?: Record<string, string>;
+	/** Scope the validation errors to one form (`x-photon-error-bag`). */
+	errorBag?: string;
+	/** Query parameters added to the URL (a GET visit sends its data there). */
+	data?: Record<string, string | number | boolean>;
+	/** Keep the page's validation errors instead of taking the server's. */
+	preserveErrors?: boolean;
+	/** Keep the address bar on the current URL whatever URL answered. */
+	preserveUrl?: boolean;
+}
+
+/** `path` with `data` added to its query string. */
+function withQuery(path: string, data: PartialRequest["data"]): string {
+	if (data === undefined || Object.keys(data).length === 0) return path;
+	const url = new URL(path, "http://photon.invalid");
+	for (const [key, value] of Object.entries(data)) {
+		url.searchParams.set(key, String(value));
+	}
+	return url.pathname + url.search + url.hash;
+}
+
+/** Whether `request` names props at all — what makes a visit a partial one. */
+function isPartial(request: PartialRequest): boolean {
+	return (
+		(request.only?.length ?? 0) > 0 ||
+		(request.except?.length ?? 0) > 0 ||
+		(request.reset?.length ?? 0) > 0
+	);
+}
+
+/**
+ * Reload part of `page` and merge the answer into what is on screen, without
+ * remounting it. Resolves true once the props are applied, false when the
+ * request was dropped: a navigation since, a failure, or another page answering.
+ *
+ * `background` is for requests the user did not ask for — a deferred group —
+ * whose flash must not be announced a second time.
+ */
+async function fetchPartial(
+	page: PhotonPageData,
+	url: string,
+	request: PartialRequest,
+	options: BootRouterOptions,
+	seq: number,
+	flags: { background: boolean },
+): Promise<boolean> {
+	if (request.onBefore?.({ url }) === false) return false;
+	let completed = false;
+	try {
+		completed = await applyPartial(page, url, request, options, seq, flags);
+		return completed;
+	} finally {
+		request.onFinish?.({ url, completed });
+	}
+}
+
+async function applyPartial(
+	page: PhotonPageData,
+	url: string,
+	request: PartialRequest,
+	options: BootRouterOptions,
+	seq: number,
+	{ background }: { background: boolean },
+): Promise<boolean> {
+	// Still the page this request belongs to: no navigation since, same component.
+	const stillCurrent = (): boolean =>
+		seq === navigationSeq && currentPage?.component === page.component;
+	const what = request.only?.join(", ") ?? "props";
+
+	let response: Response;
+	try {
+		response = await fetch(url, {
+			headers: {
+				...request.headers,
+				...exceptOnceHeader(),
+				[PHOTON_HEADER]: "true",
+				[PARTIAL_COMPONENT_HEADER]: page.component,
+				// A reset prop is asked for too: it is resolved again, then
+				// replaces what the client holds instead of joining it.
+				...listHeader(PARTIAL_DATA_HEADER, [
+					...(request.only ?? []),
+					...(request.reset ?? []),
+				]),
+				...listHeader(PARTIAL_EXCEPT_HEADER, request.except),
+				...listHeader(RESET_HEADER, request.reset),
+				...(request.errorBag !== undefined && request.errorBag !== ""
+					? { [ERROR_BAG_HEADER]: request.errorBag }
+					: {}),
+				...(currentVersion !== undefined
+					? { [VERSION_HEADER]: currentVersion }
+					: {}),
+			},
+			credentials: "same-origin",
+		});
+	} catch (err) {
+		console.error(`[photon] partial reload of ${what} failed.`, err);
+		return false;
+	}
+	if (!stillCurrent()) return false;
+	if (response.status === 409) {
+		const target = response.headers.get(LOCATION_HEADER);
+		fallbackToFullReload(target !== null && isHttpUrl(target) ? target : url);
+		return false;
+	}
+	const contentType = response.headers.get("content-type") ?? "";
+	if (!response.ok || !contentType.toLowerCase().includes("application/json")) {
+		// One request failing leaves the page and the other requests as they are.
+		console.error(
+			`[photon] partial reload of ${what} returned HTTP ${response.status}.`,
+		);
+		return false;
+	}
+	const parsed = parsePageData(await response.json().catch(() => null));
+	if (!parsed || parsed.component !== page.component || !stillCurrent()) {
+		return false;
+	}
+	let mod: { default: unknown };
+	try {
+		mod = await options.resolveComponent(page.component);
+	} catch (err) {
+		console.error(
+			"[photon] partial reload could not re-resolve the page.",
+			err,
+		);
+		return false;
+	}
+	// Read only now: requests arrive concurrently, and one read before the await
+	// above would merge into a page another request has since replaced.
+	const current = currentPage;
+	if (!stillCurrent() || current === undefined) return false;
+	const loaded = withOnceProps(parsed);
+
+	// The answer's props join what is on screen; the props it did not carry
+	// keep their current value, and the labelled ones are combined with it.
+	const props = mergePartialProps(current.props, loaded.props, loaded, {
+		only: request.only,
+		except: request.except,
+	});
+	if (request.preserveErrors === true && "errors" in current.props) {
+		props.errors = current.props.errors;
+	}
+	const next: PhotonPageData = {
+		...current,
+		props,
+		// The address the answer came from, unless the caller keeps the bar as it
+		// is (an infinite scroll asking for `?page=3` behind the user's back).
+		url:
+			request.preserveUrl !== true && isSafeNavigationUrl(loaded.url)
+				? loaded.url
+				: current.url,
+		// A scroll prop's cursor moves with each answer; the others keep theirs.
+		...(current.scrollProps !== undefined || loaded.scrollProps !== undefined
+			? { scrollProps: { ...current.scrollProps, ...loaded.scrollProps } }
+			: {}),
+		// A partial answer states the terms of the once props it carried; the
+		// others keep theirs.
+		...(current.onceProps !== undefined || loaded.onceProps !== undefined
+			? { onceProps: { ...current.onceProps, ...loaded.onceProps } }
+			: {}),
+		...(loaded.deferredProps !== undefined
+			? { deferredProps: loaded.deferredProps }
+			: {}),
+	};
+	request.onBeforeUpdate?.(next);
+	currentPage = next;
+	try {
+		options.adapter.update(mod.default, next.props);
+	} catch (err) {
+		console.error("[photon] adapter.update threw on a partial reload.", err);
+		return false;
+	}
+	// History gets the page as it now is, so back/forward does not ask again.
+	const state = await toHistoryState(next);
+	if (stillCurrent() && currentPage === next) {
+		try {
+			history.replaceState(state, "", next.url);
+		} catch {
+			// Restricted history: the props are on screen, only the cache is stale.
+		}
+	}
+	request.onSuccess?.(next);
+	announceSuccess(next);
+	if (!background) announceFlash(loaded.flash);
+	// A reload can announce deferred groups of its own.
+	if (loaded.deferredProps !== undefined && stillCurrent()) {
+		loadDeferredProps(next, options);
+	}
+	return true;
+}
+
+/**
+ * `photon:success` on `document` once a visit's page is on screen — the event
+ * `@inertiajs/core` fires as `inertia:success`, same `detail: { page }`.
+ */
+function announceSuccess(page: PhotonPageData): void {
+	if (typeof document === "undefined") return;
+	document.dispatchEvent(
+		new CustomEvent("photon:success", { detail: { page } }),
+	);
+}
+
+/** The router events a page can listen to, with what their `detail` carries. */
+export interface RouterEvents {
+	success: { page: PhotonPageData };
+	flash: { flash: object };
+}
+
+/** Writes to `history.state` from `remember`, one after the other. */
+let rememberQueue: Promise<void> = Promise.resolve();
+
+/** Store the page on screen in its history entry again, as it now is. */
+function rewriteHistoryEntry(): void {
+	rememberQueue = rememberQueue.then(async () => {
+		const page = currentPage;
+		if (page === undefined || typeof history === "undefined") return;
+		const state = await toHistoryState(page);
+		if (currentPage !== page) return;
+		try {
+			history.replaceState(state, "", page.url);
+		} catch {
+			// Restricted history: the state lives on in memory only.
+		}
+	});
+}
+
+/** The page on screen, as the router last applied it. */
+export function getCurrentPage(): PhotonPageData | undefined {
+	return currentPage;
+}
+
+/**
+ * A partial reload of the page on screen, true when its answer was applied —
+ * for helpers that must know, as `router.reload()` only settles.
+ */
+export async function reloadCurrentPage(
+	request: PartialRequest,
+): Promise<boolean> {
+	const page = currentPage;
+	const options = activeOptions;
+	if (page === undefined || options === undefined) return false;
+	return fetchPartial(
+		page,
+		withQuery(page.url, request.data),
+		{
+			...request,
+			headers: { ...request.headers, "cache-control": "no-cache" },
+		},
+		options,
+		navigationSeq,
+		{ background: false },
+	);
+}
+
+/**
+ * Tell the page about a flash bag, as a `photon:flash` event on `document` —
+ * `inertia:flash` in `@inertiajs/core`, same `detail: { flash }`. Only a
+ * non-empty bag is announced. It is never stored in history, so going back does
+ * not announce it again.
+ */
+export function announceFlash(flash: unknown): void {
+	if (typeof document === "undefined") return;
+	if (typeof flash !== "object" || flash === null) return;
+	if (Object.keys(flash).length === 0) return;
+	document.dispatchEvent(
+		new CustomEvent("photon:flash", { detail: { flash } }),
+	);
+}
+
+/** A comma-separated list header, or nothing when the list is absent. */
+function listHeader(
+	name: string,
+	values: string[] | undefined,
+): Record<string, string> {
+	return values !== undefined && values.length > 0
+		? { [name]: values.join(",") }
+		: {};
+}
+
+/**
+ * Options for {@link router.visit}: the subset of Inertia's visit options that
+ * a GET navigation uses, under the same names.
+ */
+export interface VisitOptions extends PartialRequest {
+	/** Replace the current history entry instead of adding one. */
+	replace?: boolean;
+}
+
+/**
+ * Navigate and reload from code, the shape of `@inertiajs/core`'s `router`.
+ *
+ * - `visit(url)` fetches the page and swaps it in; with `only` / `except` /
+ *   `reset` it is a partial reload of the page on screen, merged without
+ *   remounting it. A URL on another origin, or a call before the page is
+ *   hydrated, is a full navigation.
+ * - `reload()` is `visit()` of the current URL, sent with
+ *   `Cache-Control: no-cache` so no cache answers it.
+ *
+ * One deliberate difference: both return a promise that settles once the page
+ * is applied (or the visit dropped), where Inertia's return nothing and report
+ * through callbacks. Code written for Inertia, which ignores the return value,
+ * works unchanged.
+ */
+export const router = {
+	async visit(url: string, visitOptions: VisitOptions = {}): Promise<void> {
+		const resolved = resolveUrl(url);
+		if (
+			activeOptions === undefined ||
+			resolved === null ||
+			typeof location === "undefined" ||
+			resolved.origin !== location.origin ||
+			(resolved.protocol !== "http:" && resolved.protocol !== "https:")
+		) {
+			if (resolved !== null && isHttpUrl(resolved.href)) {
+				fallbackToFullReload(resolved.href);
+			}
+			return;
+		}
+		const path = withQuery(
+			resolved.pathname + resolved.search + resolved.hash,
+			visitOptions.data,
+		);
+		const page = currentPage;
+		if (isPartial(visitOptions) && page !== undefined) {
+			await fetchPartial(
+				page,
+				path,
+				visitOptions,
+				activeOptions,
+				navigationSeq,
+				{
+					background: false,
+				},
+			);
+			return;
+		}
+		await navigate(path, activeOptions, visitOptions);
+	},
+
+	async reload(request: PartialRequest = {}): Promise<void> {
+		const page = currentPage;
+		if (page === undefined) return;
+		await router.visit(page.url, {
+			...request,
+			replace: true,
+			headers: { ...request.headers, "cache-control": "no-cache" },
+		});
+	},
+
+	/**
+	 * Listen to a router event; returns the function that stops listening.
+	 * `router.on('success', …)` hears every visit whose page reached the screen.
+	 */
+	on<K extends keyof RouterEvents>(
+		type: K,
+		callback: (event: CustomEvent<RouterEvents[K]>) => void,
+	): () => void {
+		if (typeof document === "undefined") return () => {};
+		const listener = (event: Event): void => {
+			if (event instanceof CustomEvent) callback(event);
+		};
+		document.addEventListener(`photon:${type}`, listener);
+		return () => document.removeEventListener(`photon:${type}`, listener);
+	},
+
+	/**
+	 * Keep `data` under `key` in the page's history entry, so it is there again
+	 * when the user comes back to it — by the back button or by reloading the
+	 * tab. Encrypted with the rest of the page when the page asks for it.
+	 */
+	remember(data: unknown, key = "default"): void {
+		const page = currentPage;
+		if (page === undefined) return;
+		currentPage = {
+			...page,
+			rememberedState: { ...page.rememberedState, [key]: data },
+		};
+		rewriteHistoryEntry();
+	},
+
+	/** What {@link router.remember} kept under `key` for the page on screen. */
+	restore(key = "default"): unknown {
+		return currentPage?.rememberedState?.[key];
+	},
+
+	/**
+	 * Change the page on screen without a request — the `url` part of
+	 * Inertia's client-side `router.replace()`. Refused for a URL on another
+	 * origin, which `history.replaceState` could not show anyway.
+	 */
+	replace({ url }: { url: string }): void {
+		const page = currentPage;
+		if (page === undefined || !isSafeNavigationUrl(url)) return;
+		currentPage = { ...page, url };
+		rewriteHistoryEntry();
+	},
+};
 
 function resolvedSameUrl(target: string, current: string): boolean {
 	try {
@@ -367,25 +937,51 @@ async function handlePopState(
 	event: PopStateEvent,
 	options: BootRouterOptions,
 ): Promise<void> {
-	const state = event.state as { photonData?: unknown } | null;
-	if (!state || typeof state !== "object" || !("photonData" in state)) {
+	const ownSeq = ++navigationSeq;
+	if (!isPhotonState(event.state)) {
 		// No state (e.g. user navigated to a non-Photon URL). Full reload restores
 		// browser intent without trying to interpret a non-Photon page in-flight.
-		if (typeof location !== "undefined") {
-			location.reload();
-		}
+		reloadFromServer();
 		return;
 	}
 
-	const pageData = parsePageData(state.photonData);
-	if (!pageData) {
-		if (typeof location !== "undefined") {
-			location.reload();
-		}
+	// Unreadable — withheld, or encrypted under a key `clearHistory` deleted —
+	// means the server decides what this URL shows now. That is the point of
+	// clearing: the back button after logout gets a login page, not the
+	// previous session's props.
+	const pageData = parsePageData(await readHistoryState(event.state));
+	if (ownSeq !== navigationSeq) return;
+	if (!pageData || isStaleVersion(pageData)) {
+		reloadFromServer();
 		return;
 	}
 
-	await applyPageData(pageData, options, /* fromHistory */ true);
+	await applyPageData(pageData, options, /* fromHistory */ true, ownSeq);
+}
+
+/**
+ * A page restored from the back-forward cache comes back as it was, DOM and
+ * all, without a `popstate`. If its history entry can no longer be read — the
+ * key was cleared at logout — it must not stay on screen either.
+ */
+async function handlePageShow(event: PageTransitionEvent): Promise<void> {
+	if (!event.persisted || typeof history === "undefined") return;
+	const state: unknown = history.state;
+	if (!isPhotonState(state)) return;
+	if ((await readHistoryState(state)) === undefined) reloadFromServer();
+}
+
+/** A page stored under an asset version the server no longer runs. */
+function isStaleVersion(pageData: PhotonPageData): boolean {
+	return (
+		pageData.version !== undefined &&
+		currentVersion !== undefined &&
+		pageData.version !== currentVersion
+	);
+}
+
+function reloadFromServer(): void {
+	if (typeof location !== "undefined") location.reload();
 }
 
 function parsePageData(value: unknown): PhotonPageData | null {
@@ -417,7 +1013,142 @@ function parsePageData(value: unknown): PhotonPageData | null {
 	if (typeof meta === "object" && meta !== null && !Array.isArray(meta)) {
 		out.meta = meta as MetaTags;
 	}
+	if (typeof obj.version === "string") out.version = obj.version;
+	if (obj.clearHistory === true) out.clearHistory = true;
+	if (obj.encryptHistory === true) out.encryptHistory = true;
+	const deferredProps = readDeferredProps(obj.deferredProps);
+	if (deferredProps !== undefined) out.deferredProps = deferredProps;
+	for (const label of MERGE_LABELS) {
+		const names = readStringList(obj[label]);
+		if (names !== undefined) out[label] = names;
+	}
+	const onceProps = readOnceProps(obj.onceProps);
+	if (onceProps !== undefined) out.onceProps = onceProps;
+	const scrollProps = readScrollProps(obj.scrollProps);
+	if (scrollProps !== undefined) out.scrollProps = scrollProps;
+	const remembered = obj.rememberedState;
+	if (
+		typeof remembered === "object" &&
+		remembered !== null &&
+		!Array.isArray(remembered)
+	) {
+		out.rememberedState = { ...remembered };
+	}
+	if (typeof obj.flash === "object" && obj.flash !== null)
+		out.flash = obj.flash;
 	return out;
+}
+
+/** A page cursor: a page number, a cursor string, or null at either end. */
+function isPageRef(value: unknown): value is number | string | null {
+	return (
+		value === null || typeof value === "number" || typeof value === "string"
+	);
+}
+
+/** A page's `scrollProps`, when every entry has the shape the server sends. */
+export function readScrollProps(
+	value: unknown,
+): Record<string, ScrollPropMeta> | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return undefined;
+	}
+	const out: Record<string, ScrollPropMeta> = {};
+	for (const [key, meta] of Object.entries(value)) {
+		if (typeof meta !== "object" || meta === null) return undefined;
+		const pageName: unknown = Reflect.get(meta, "pageName");
+		const currentPage: unknown = Reflect.get(meta, "currentPage");
+		const nextPage: unknown = Reflect.get(meta, "nextPage");
+		const previousPage: unknown = Reflect.get(meta, "previousPage");
+		const reset: unknown = Reflect.get(meta, "reset");
+		if (
+			typeof pageName !== "string" ||
+			!isPageRef(currentPage) ||
+			!isPageRef(nextPage) ||
+			!isPageRef(previousPage)
+		) {
+			return undefined;
+		}
+		out[key] = {
+			pageName,
+			currentPage,
+			nextPage,
+			previousPage,
+			reset: reset === true,
+		};
+	}
+	return out;
+}
+
+/** A page's `onceProps`, when every entry has the shape the server sends. */
+export function readOnceProps(
+	value: unknown,
+): Record<string, OncePropMeta> | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return undefined;
+	}
+	const out: Record<string, OncePropMeta> = {};
+	for (const [key, meta] of Object.entries(value)) {
+		if (typeof meta !== "object" || meta === null) return undefined;
+		const prop: unknown = Reflect.get(meta, "prop");
+		const expiresAt: unknown = Reflect.get(meta, "expiresAt");
+		if (
+			typeof prop !== "string" ||
+			(expiresAt !== null && typeof expiresAt !== "number")
+		) {
+			return undefined;
+		}
+		out[key] = { prop, expiresAt };
+	}
+	return out;
+}
+
+/** The page fields that say how a partial reload's props combine. */
+const MERGE_LABELS = [
+	"mergeProps",
+	"prependProps",
+	"deepMergeProps",
+	"matchPropsOn",
+] as const;
+
+/** A list of strings, or undefined for anything else. */
+function readStringList(value: unknown): string[] | undefined {
+	return Array.isArray(value) && value.every((item) => typeof item === "string")
+		? value
+		: undefined;
+}
+
+/**
+ * A page's `deferredProps`, when it is the shape the server sends: groups of
+ * prop names. Anything else is dropped rather than half-trusted.
+ */
+export function readDeferredProps(
+	value: unknown,
+): Record<string, string[]> | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return undefined;
+	}
+	const groups: Record<string, string[]> = {};
+	for (const [group, names] of Object.entries(value)) {
+		if (
+			!Array.isArray(names) ||
+			!names.every((name) => typeof name === "string")
+		) {
+			return undefined;
+		}
+		groups[group] = names;
+	}
+	return groups;
+}
+
+/** A relative URL, or an absolute one over http(s) — never `javascript:`. */
+function isHttpUrl(value: string): boolean {
+	try {
+		const url = new URL(value, location.href);
+		return url.protocol === "http:" || url.protocol === "https:";
+	} catch {
+		return false;
+	}
 }
 
 function fallbackToFullReload(url: string): void {

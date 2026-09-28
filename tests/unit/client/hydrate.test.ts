@@ -85,10 +85,12 @@ describe("photon/client > hydrate — happy path", () => {
 	it("dispatches to the Vue adapter when framework=vue", async () => {
 		const vueMount = vi.fn();
 		vi.doMock("vue", () => ({
-			createSSRApp: (_root: unknown, _props: unknown) => ({
+			createSSRApp: (_root: unknown) => ({
 				mount: vueMount,
 				unmount: vi.fn(),
 			}),
+			h: () => null,
+			shallowRef: <T>(value: T) => ({ value }),
 		}));
 
 		setupDom({ framework: "vue", component: "About", props: { title: "Hi" } });

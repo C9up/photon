@@ -4,3 +4,6 @@ dist/
 .DS_Store
 coverage/
 *.log
+# vitest browser-mode artifacts
+.vitest-attachments/
+__screenshots__/

@@ -23,7 +23,16 @@
 import type { MetaTags } from "../seo/Meta.js";
 import type { PhotonAdapter } from "./adapters/types.js";
 import { PhotonClientError } from "./errors.js";
-import { bootRouter, type ResolveComponent } from "./router.js";
+import { readHistoryState, toHistoryState } from "./history.js";
+import type { OncePropMeta } from "./mergeProps.js";
+import {
+	announceFlash,
+	bootRouter,
+	type ResolveComponent,
+	readDeferredProps,
+	readOnceProps,
+	readScrollProps,
+} from "./router.js";
 
 /** Frameworks supported by the bundled adapters. Mirrors `PhotonConfig.framework`. */
 export type ClientFramework = "react" | "vue" | "svelte";
@@ -42,6 +51,44 @@ export interface PhotonPageData {
 	 * initial bootstrap (the SSR HTML already wrote those tags).
 	 */
 	meta?: MetaTags;
+	/**
+	 * The asset fingerprint the page was built against. The router echoes it
+	 * as `x-photon-version`, and the server answers a stale one with a 409.
+	 */
+	version?: string;
+	/** Forget every earlier history entry (the server sends it at logout). */
+	clearHistory?: boolean;
+	/** Store this page in history encrypted, never in the clear. */
+	encryptHistory?: boolean;
+	/** Props announced but not sent, by group: the client asks for each. */
+	deferredProps?: Record<string, string[]>;
+	/** Props a partial reload appends to what the client holds. */
+	mergeProps?: string[];
+	/** Props a partial reload puts before what the client holds. */
+	prependProps?: string[];
+	/** Props a partial reload merges recursively. */
+	deepMergeProps?: string[];
+	/** `prop.key` pairs: the field that identifies an item of a merged list. */
+	matchPropsOn?: string[];
+	/** The caching terms of every `once` prop, by key. */
+	onceProps?: Record<string, OncePropMeta>;
+	/** A one-shot bag beside the props, announced as `photon:flash`. */
+	flash?: object;
+	/** The pagination cursor of every scroll prop, by name. */
+	scrollProps?: Record<string, ScrollPropMeta>;
+	/** What `router.remember()` kept for this page, by key. */
+	rememberedState?: Record<string, unknown>;
+}
+
+/** Where a scroll prop is, and which pages come before and after it. */
+export interface ScrollPropMeta {
+	/** The query parameter the page is asked for with. */
+	pageName: string;
+	currentPage: number | string | null;
+	nextPage: number | string | null;
+	previousPage: number | string | null;
+	/** True when the client asked to start the list over. */
+	reset: boolean;
 }
 
 export interface HydrateOptions {
@@ -63,12 +110,37 @@ export interface HydrateOptions {
 	target?: string;
 	/** Fires once after the initial hydrate completes. */
 	onHydrated?: () => void;
+	/**
+	 * Svelte only: Photon's root, `import PhotonRoot from '@c9up/photon/svelte'`.
+	 * The SSR entry must render the same root. Without it a page is remounted,
+	 * losing its state, whenever its props change.
+	 */
+	svelteRoot?: unknown;
 }
 
 export type { PhotonClientErrorCode } from "./errors.js";
 /** Re-export so consumers can `instanceof`-check without a second import. */
 export { PhotonClientError } from "./errors.js";
-export type { ResolveComponent } from "./router.js";
+export {
+	getScrollableParent,
+	type InfiniteScrollData,
+	type InfiniteScrollDataOptions,
+	type InfiniteScrollElementManager,
+	type InfiniteScrollOnCompleteDetails,
+	type InfiniteScrollPageIdentifier,
+	type UseInfiniteScrollOptions,
+	type UseInfiniteScrollProps,
+	useInfiniteScroll,
+	useInfiniteScrollData,
+} from "./infiniteScroll.js";
+export type {
+	PartialRequest,
+	ResolveComponent,
+	RouterEvents,
+	VisitCallbacks,
+	VisitOptions,
+} from "./router.js";
+export { router } from "./router.js";
 
 /**
  * Tracks targets that have already been hydrated so a second `hydrate()` call
@@ -113,7 +185,9 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 	const Component = componentModule.default;
 
 	const adapter = await loadAdapter(pageData.framework);
-	const handle = await adapter.hydrate(target, Component, pageData.props);
+	const handle = await adapter.hydrate(target, Component, pageData.props, {
+		svelteRoot: options.svelteRoot,
+	});
 
 	hydratedTargets.add(target);
 
@@ -124,8 +198,18 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 		typeof history !== "undefined" &&
 		typeof history.replaceState === "function"
 	) {
+		// A reload of the tab keeps what the page remembered: the entry it
+		// overwrites belonged to this very page. Read before the key can be
+		// cleared below.
+		const previous: unknown = await readHistoryState(history.state);
+		const remembered = rememberedStateOf(previous, pageData);
+		if (remembered !== undefined) pageData.rememberedState = remembered;
+		// Through `toHistoryState`, so a first page that asks for encryption is
+		// never stored in the clear — and a login page reached after logout,
+		// carrying `clearHistory`, drops the key before anything else is stored.
+		const state = await toHistoryState(pageData);
 		try {
-			history.replaceState({ photonData: pageData }, "", pageData.url);
+			history.replaceState(state, "", pageData.url);
 		} catch {
 			// Some test environments (or very old browsers) restrict replaceState.
 			// Hydration still succeeds; only SPA-nav back/forward will fall back to
@@ -137,7 +221,11 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 		target,
 		adapter: handle,
 		resolveComponent: options.resolveComponent,
+		page: pageData,
 	});
+	// After the page is up, as Inertia fires its initial events: a listener
+	// registered by the page's own code must be there to hear it.
+	queueMicrotask(() => announceFlash(pageData.flash));
 
 	options.onHydrated?.();
 }
@@ -236,6 +324,23 @@ function validatePageData(value: unknown): PhotonPageData {
 	if (isPlainObject(meta)) {
 		out.meta = meta as MetaTags;
 	}
+	const version = (value as Record<string, unknown>).version;
+	if (typeof version === "string") out.version = version;
+	const { clearHistory, encryptHistory } = value as Record<string, unknown>;
+	if (clearHistory === true) out.clearHistory = true;
+	if (encryptHistory === true) out.encryptHistory = true;
+	const deferredProps = readDeferredProps(
+		(value as Record<string, unknown>).deferredProps,
+	);
+	if (deferredProps !== undefined) out.deferredProps = deferredProps;
+	const onceProps = readOnceProps((value as Record<string, unknown>).onceProps);
+	if (onceProps !== undefined) out.onceProps = onceProps;
+	const flash = (value as Record<string, unknown>).flash;
+	if (typeof flash === "object" && flash !== null) out.flash = flash;
+	const scrollProps = readScrollProps(
+		(value as Record<string, unknown>).scrollProps,
+	);
+	if (scrollProps !== undefined) out.scrollProps = scrollProps;
 
 	return out;
 }
@@ -305,4 +410,23 @@ function frameworkInstallSpec(framework: ClientFramework): string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The remembered state of `previous` — the history entry the tab had before
+ * this load — when it was this same page at this same URL.
+ */
+function rememberedStateOf(
+	previous: unknown,
+	page: PhotonPageData,
+): Record<string, unknown> | undefined {
+	if (typeof previous !== "object" || previous === null) return undefined;
+	if (Reflect.get(previous, "component") !== page.component) return undefined;
+	if (Reflect.get(previous, "url") !== page.url) return undefined;
+	const remembered: unknown = Reflect.get(previous, "rememberedState");
+	return typeof remembered === "object" &&
+		remembered !== null &&
+		!Array.isArray(remembered)
+		? { ...remembered }
+		: undefined;
 }
