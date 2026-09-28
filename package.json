@@ -23,10 +23,18 @@
       "types": "./src/client/hydrate.ts",
       "import": "./src/client/hydrate.ts"
     },
+    "./react": {
+      "types": "./src/client/react/index.ts",
+      "import": "./src/client/react/index.ts"
+    },
+    "./vue": {
+      "types": "./src/client/vue/index.ts",
+      "import": "./src/client/vue/index.ts"
+    },
     "./svelte": {
-      "types": "./src/client/svelte/PhotonRoot.d.ts",
-      "svelte": "./src/client/svelte/PhotonRoot.svelte",
-      "default": "./src/client/svelte/PhotonRoot.svelte"
+      "types": "./src/client/svelte/index.d.ts",
+      "svelte": "./src/client/svelte/index.js",
+      "default": "./src/client/svelte/index.js"
     }
   },
   "scripts": {
@@ -127,10 +135,18 @@
         "types": "./dist/client/hydrate.d.ts",
         "import": "./dist/client/hydrate.js"
       },
+      "./react": {
+        "types": "./dist/client/react/index.d.ts",
+        "import": "./dist/client/react/index.js"
+      },
+      "./vue": {
+        "types": "./dist/client/vue/index.d.ts",
+        "import": "./dist/client/vue/index.js"
+      },
       "./svelte": {
-        "types": "./src/client/svelte/PhotonRoot.d.ts",
-        "svelte": "./src/client/svelte/PhotonRoot.svelte",
-        "default": "./src/client/svelte/PhotonRoot.svelte"
+        "types": "./src/client/svelte/index.d.ts",
+        "svelte": "./src/client/svelte/index.js",
+        "default": "./src/client/svelte/index.js"
       }
     },
     "access": "public"

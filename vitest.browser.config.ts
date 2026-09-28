@@ -15,8 +15,8 @@ const executablePath = process.env.PHOTON_CHROMIUM;
  * send: `PhotonRoot` around the page.
  */
 const renderSvelte: BrowserCommand<
-	[page: string, props: Record<string, unknown>]
-> = async (ctx, page, props) => {
+	[page: string, props: Record<string, unknown>, url?: string]
+> = async (ctx, page, props, url) => {
 	const vite = ctx.project.vite;
 	const server: { render(c: unknown, o: unknown): { body: string } } =
 		await vite.ssrLoadModule("svelte/server");
@@ -25,12 +25,23 @@ const renderSvelte: BrowserCommand<
 		`/tests/browser/fixtures/${page}.svelte`,
 	);
 	return server.render(root.default, {
-		props: { component: component.default, props },
+		props: {
+			component: component.default,
+			props,
+			// The whole page, as the SSR entry passes it, when the test gives a URL.
+			...(url === undefined
+				? {}
+				: { page: { component: page, framework: "svelte", url, props } }),
+		},
 	}).body;
 };
 
 export default defineConfig({
 	plugins: [svelte()],
+	// Pre-bundled up front: discovered mid-run, Vite reloads the test page.
+	optimizeDeps: {
+		include: ["react", "react-dom/client", "vue"],
+	},
 	test: {
 		include: ["tests/browser/**/*.test.ts"],
 		browser: {

@@ -245,15 +245,19 @@ function isRememberedCursor(value: unknown): value is RememberedCursor {
 
 // ─── DOM helpers (`src/domUtils.ts`) ─────────────────────────────────────
 
+/** A debounced `fn`, with `cancel()` for a call still waiting. */
 function debounce<A extends unknown[]>(
 	fn: (...args: A) => void,
 	delay: number,
-): (...args: A) => void {
+): ((...args: A) => void) & { cancel(): void } {
 	let timeout: ReturnType<typeof setTimeout> | undefined;
-	return (...args: A) => {
+	const debounced = (...args: A): void => {
 		clearTimeout(timeout);
 		timeout = setTimeout(() => fn(...args), delay);
 	};
+	return Object.assign(debounced, {
+		cancel: () => clearTimeout(timeout),
+	});
 }
 
 /** Call `callback` after `times` animation frames. */
@@ -377,7 +381,7 @@ interface ElementManagerOptions {
 	getTriggerMargin(): number;
 	getStartElement(): HTMLElement | null;
 	getEndElement(): HTMLElement | null;
-	getItemsElement(): HTMLElement;
+	getItemsElement(): HTMLElement | null;
 	getScrollableParent(): HTMLElement | null;
 	shouldFetchNext(): boolean;
 	shouldFetchPrevious(): boolean;
@@ -427,7 +431,9 @@ function useInfiniteScrollElementManager(
 	/** Which rows came with which page, as index ranges — kept in history. */
 	const rememberElements = (): void => {
 		const ranges: Record<string, { from: number; to: number }> = {};
-		const children = options.getItemsElement().childNodes;
+		const items = options.getItemsElement();
+		if (!items) return;
+		const children = items.childNodes;
 		for (let index = 0; index < children.length; index++) {
 			const node = children[index];
 			if (node === undefined || !isHTMLElement(node)) continue;
@@ -444,7 +450,9 @@ function useInfiniteScrollElementManager(
 	const restoreElements = (): boolean => {
 		const ranges = router.restore(rememberKey());
 		if (typeof ranges !== "object" || ranges === null) return false;
-		const children = options.getItemsElement().childNodes;
+		const items = options.getItemsElement();
+		if (!items) return false;
+		const children = items.childNodes;
 		for (let index = 0; index < children.length; index++) {
 			const node = children[index];
 			if (node === undefined || !isHTMLElement(node)) continue;
@@ -477,7 +485,8 @@ function useInfiniteScrollElementManager(
 			}
 			rememberElementsDebounced();
 		});
-		mutationObserver.observe(options.getItemsElement(), { childList: true });
+		const items = options.getItemsElement();
+		if (items) mutationObserver.observe(items, { childList: true });
 		itemsObserver = newObserver((entry) => {
 			if (entry.target instanceof HTMLElement) {
 				options.onItemIntersected(entry.target);
@@ -517,6 +526,8 @@ function useInfiniteScrollElementManager(
 			if (triggersEnabled) enableTriggers();
 		},
 		flushAll: () => {
+			// A remember still waiting would read a list that is gone.
+			rememberElementsDebounced.cancel();
 			disableTriggers();
 			for (const observer of observers) observer.disconnect();
 			observers.length = 0;
@@ -536,6 +547,7 @@ function useInfiniteScrollElementManager(
 				if (restoreElements()) return;
 			}
 			const container = options.getItemsElement();
+			if (!container) return;
 			const untagged = container.querySelectorAll<HTMLElement>(
 				":scope > *:not([data-infinite-scroll-page]):not([data-infinite-scroll-ignore])",
 			);
@@ -555,7 +567,7 @@ function useInfiniteScrollElementManager(
 
 interface QueryStringOptions {
 	getPageName(): string;
-	getItemsElement(): HTMLElement;
+	getItemsElement(): HTMLElement | null;
 	shouldPreserveUrl(): boolean;
 }
 
@@ -581,7 +593,7 @@ function useInfiniteScrollQueryString(options: QueryStringOptions): {
 
 	const onItemIntersected = debounce((item: HTMLElement) => {
 		const container = options.getItemsElement();
-		if (!enabled || options.shouldPreserveUrl()) return;
+		if (!enabled || !container || options.shouldPreserveUrl()) return;
 		const counts = new Map<string, number>();
 		const children = Array.from(container.children).filter(
 			(child): child is HTMLElement => child instanceof HTMLElement,
@@ -598,6 +610,7 @@ function useInfiniteScrollQueryString(options: QueryStringOptions): {
 		onItemIntersected,
 		cancel: () => {
 			enabled = false;
+			onItemIntersected.cancel();
 		},
 	};
 }
@@ -606,7 +619,7 @@ function useInfiniteScrollQueryString(options: QueryStringOptions): {
 
 interface PreservationOptions {
 	getScrollableParent(): HTMLElement | null;
-	getItemsElement(): HTMLElement;
+	getItemsElement(): HTMLElement | null;
 }
 
 /**
@@ -631,7 +644,7 @@ function useInfiniteScrollPreservation(options: PreservationOptions): {
 					const container = options.getScrollableParent();
 					scrollTop = container?.scrollTop || window.scrollY;
 					const children = Array.from(
-						options.getItemsElement().children,
+						options.getItemsElement()?.children ?? [],
 					).filter(
 						(child): child is HTMLElement => child instanceof HTMLElement,
 					);
@@ -685,7 +698,7 @@ export interface UseInfiniteScrollOptions {
 	getStartElement(): HTMLElement | null;
 	getEndElement(): HTMLElement | null;
 	/** The element whose children are the rows. */
-	getItemsElement(): HTMLElement;
+	getItemsElement(): HTMLElement | null;
 	getScrollableParent(): HTMLElement | null;
 	onBeforePreviousRequest(): void;
 	onBeforeNextRequest(): void;

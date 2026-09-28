@@ -1636,3 +1636,112 @@ describe("photon/client > router — events, callbacks, remember", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });
+
+describe("photon/client > router — visits other than GET", () => {
+	it("posts JSON with the XSRF token the server seeded", async () => {
+		// The cookie as the server's CSRF middleware seeds it, URL-encoded.
+		vi.spyOn(Document.prototype, "cookie", "get").mockReturnValue(
+			"theme=dark; XSRF-TOKEN=abc%3Ddef",
+		);
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({ component: "Orders", url: "/orders/1", props: {} }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage();
+		const onSuccess = vi.fn();
+
+		await router.post("/orders", { item: "tea", qty: 2 }, { onSuccess });
+
+		const init = fetchMock.mock.calls[0]?.[1];
+		expect(init?.method).toBe("POST");
+		expect(init?.body).toBe('{"item":"tea","qty":2}');
+		expect(sentHeader(init, "content-type")).toBe("application/json");
+		expect(sentHeader(init, "X-XSRF-TOKEN")).toBe("abc=def");
+		expect(onSuccess).toHaveBeenCalledTimes(1);
+	});
+
+	it("sends multipart as soon as there is a file, nested keys bracketed", async () => {
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({ component: "Profile", url: "/profile", props: {} }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage();
+
+		await router.put("/profile", {
+			avatar: new File(["x"], "me.png"),
+			user: { name: "Ada", admin: false },
+			tags: ["a", "b"],
+		});
+
+		const body = fetchMock.mock.calls[0]?.[1]?.body;
+		if (!(body instanceof FormData)) throw new Error("expected FormData");
+		expect(body.get("avatar")).toBeInstanceOf(File);
+		expect(body.get("user[name]")).toBe("Ada");
+		expect(body.get("user[admin]")).toBe("0");
+		expect(body.getAll("tags[]")).toEqual(["a", "b"]);
+		expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT");
+	});
+
+	it("calls onError, not onSuccess, when the page comes back with errors", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				pageResponse({
+					component: "Login",
+					url: "/login",
+					props: { errors: { login: { email: "required" } } },
+				}),
+			),
+		);
+		await bootHydratedReactPage();
+		const onSuccess = vi.fn();
+		const onError = vi.fn();
+		const heard: unknown[] = [];
+		const off = router.on("error", (event) => heard.push(event.detail.errors));
+
+		await router.post("/login", {}, { errorBag: "login", onSuccess, onError });
+		off();
+
+		expect(onError).toHaveBeenCalledWith({ email: "required" });
+		expect(onSuccess).not.toHaveBeenCalled();
+		expect(heard).toEqual([{ email: "required" }]);
+	});
+
+	it("stays on the page when a mutation fails, instead of reloading its URL as a GET", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response("", { status: 500 })),
+		);
+		await bootHydratedReactPage();
+		const { hrefSetter, restore } = spyOnHrefSetter();
+		try {
+			await router.delete("/orders/1");
+			expect(hrefSetter).not.toHaveBeenCalled();
+		} finally {
+			restore();
+		}
+	});
+
+	it("puts a GET visit's data in the query, nested and repeated", async () => {
+		const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+			pageResponse({ component: "Search", url, props: {} }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage();
+
+		await router.get("/search?page=1", {
+			q: "tea",
+			filter: { tag: ["a", "b"] },
+		});
+
+		const url = new URL(
+			String(fetchMock.mock.calls[0]?.[0]),
+			"http://localhost/",
+		);
+		expect(url.searchParams.get("q")).toBe("tea");
+		expect(url.searchParams.get("page")).toBe("1");
+		expect(url.searchParams.getAll("filter[tag][]")).toEqual(["a", "b"]);
+		expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+	});
+});

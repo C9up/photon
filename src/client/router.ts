@@ -65,6 +65,40 @@ let currentVersion: string | undefined;
 /** The page on screen, as last applied — what deferred props are merged into. */
 let currentPage: PhotonPageData | undefined;
 
+/** Who wants to know when the page on screen changes (`usePage`). */
+const pageListeners = new Set<(page: PhotonPageData) => void>();
+
+/** Make `page` the page on screen, and tell every subscriber. */
+function setCurrentPage(page: PhotonPageData | undefined): void {
+	currentPage = page;
+	if (page === undefined) return;
+	for (const listener of pageListeners) listener(page);
+}
+
+/**
+ * The page about to be hydrated, known before the framework renders it — so a
+ * component reading `usePage()` during hydration sees the page the server
+ * rendered. `bootRouter` confirms it once the page is up.
+ */
+export function primeCurrentPage(page: PhotonPageData): void {
+	currentPage = page;
+}
+
+/**
+ * Be told whenever the page on screen changes — a navigation, a partial
+ * reload, the back button, `remember` or `replace`. Returns the unsubscriber.
+ * What the framework `usePage()` of `@c9up/photon/react`, `/vue` and
+ * `/svelte` is built on.
+ */
+export function subscribeToPage(
+	listener: (page: PhotonPageData) => void,
+): () => void {
+	pageListeners.add(listener);
+	return () => {
+		pageListeners.delete(listener);
+	};
+}
+
 const PARTIAL_COMPONENT_HEADER = "x-photon-partial-component";
 const PARTIAL_DATA_HEADER = "x-photon-partial-data";
 const PARTIAL_EXCEPT_HEADER = "x-photon-partial-except";
@@ -123,7 +157,7 @@ export function bootRouter(options: BootRouterOptions): void {
 
 	activeOptions = options;
 	currentVersion = options.page?.version;
-	currentPage = options.page;
+	setCurrentPage(options.page);
 	if (options.page !== undefined) loadDeferredProps(options.page, options);
 
 	if (listenersInstalled) return;
@@ -239,10 +273,17 @@ async function navigate(
 	visitOptions: VisitOptions = {},
 ): Promise<void> {
 	if (visitOptions.onBefore?.({ url: targetPath }) === false) return;
+	const visit = describeVisit(
+		targetPath,
+		visitOptions,
+		visitOptions.preserveState === true,
+	);
+	announceVisit("start", visit);
 	let completed = false;
 	try {
 		completed = await fetchAndApply(targetPath, options, visitOptions);
 	} finally {
+		announceVisit("finish", visit);
 		visitOptions.onFinish?.({ url: targetPath, completed });
 	}
 }
@@ -254,12 +295,37 @@ async function fetchAndApply(
 	visitOptions: VisitOptions,
 ): Promise<boolean> {
 	const ownSeq = ++navigationSeq;
+	const controller = new AbortController();
+	const method = visitOptions.method ?? "get";
+	// A mutation that fails must not be replayed as a GET of its URL, which is
+	// what the full-reload fallback would do: it stays on the page instead.
+	const fallback = (url: string): void => {
+		if (method === "get") fallbackToFullReload(url);
+	};
+	const data = visitOptions.data;
+	const body =
+		method === "get" || data === undefined
+			? undefined
+			: data instanceof FormData
+				? data
+				: visitOptions.forceFormData === true || hasFiles(data)
+					? toFormData(data)
+					: JSON.stringify(data);
 
 	let response: Response;
 	try {
+		visitOptions.onStart?.({ url: targetPath });
+		visitOptions.onCancelToken?.({ cancel: () => controller.abort() });
 		response = await fetch(targetPath, {
+			signal: controller.signal,
+			method: method.toUpperCase(),
+			...(body !== undefined ? { body } : {}),
 			headers: {
 				...visitOptions.headers,
+				...(typeof body === "string"
+					? { "content-type": "application/json" }
+					: {}),
+				...(method !== "get" ? xsrfHeader(targetPath) : {}),
 				...exceptOnceHeader(),
 				[PHOTON_HEADER]: "true",
 				...(visitOptions.errorBag !== undefined && visitOptions.errorBag !== ""
@@ -272,6 +338,11 @@ async function fetchAndApply(
 			credentials: "same-origin",
 		});
 	} catch (err) {
+		// Cancelled through its token: nothing to fall back to, the user asked.
+		if (controller.signal.aborted) {
+			visitOptions.onCancel?.();
+			return false;
+		}
 		// Network failure — fall back to a real navigation rather than swallow.
 		// Skip the fallback if a newer nav started in the meantime.
 		if (ownSeq !== navigationSeq) return false;
@@ -279,7 +350,7 @@ async function fetchAndApply(
 			"[photon] SPA-nav fetch failed; falling back to full reload.",
 			err,
 		);
-		fallbackToFullReload(targetPath);
+		fallback(targetPath);
 		return false;
 	}
 
@@ -302,7 +373,7 @@ async function fetchAndApply(
 		console.error(
 			`[photon] SPA-nav returned HTTP ${response.status}; falling back to full reload.`,
 		);
-		fallbackToFullReload(targetPath);
+		fallback(targetPath);
 		return false;
 	}
 
@@ -310,7 +381,7 @@ async function fetchAndApply(
 	if (!contentType.toLowerCase().includes("application/json")) {
 		// Server returned a full SSR page (or something else). Full reload preserves
 		// the user's intent without trying to interpret HTML as page-data.
-		fallbackToFullReload(targetPath);
+		fallback(targetPath);
 		return false;
 	}
 
@@ -322,7 +393,7 @@ async function fetchAndApply(
 			"[photon] SPA-nav JSON parse failed; falling back to full reload.",
 			err,
 		);
-		fallbackToFullReload(targetPath);
+		fallback(targetPath);
 		return false;
 	}
 
@@ -332,7 +403,7 @@ async function fetchAndApply(
 
 	const parsed = parsePageData(payload);
 	if (!parsed) {
-		fallbackToFullReload(targetPath);
+		fallback(targetPath);
 		return false;
 	}
 	const newPageData = withOnceProps(parsed);
@@ -346,8 +417,14 @@ async function fetchAndApply(
 		visitOptions.replace === true,
 	);
 	if (ownSeq !== navigationSeq || currentPage === undefined) return false;
-	visitOptions.onSuccess?.(currentPage);
-	announceSuccess(currentPage);
+	const errors = errorsOf(currentPage, visitOptions.errorBag);
+	if (Object.keys(errors).length > 0) {
+		visitOptions.onError?.(errors);
+		announceErrors(errors);
+	} else {
+		visitOptions.onSuccess?.(currentPage);
+		announceSuccess(currentPage);
+	}
 	announceFlash(newPageData.flash);
 	return true;
 }
@@ -394,7 +471,7 @@ async function applyPageData(
 	if (expectedSeq !== undefined && expectedSeq !== navigationSeq) return;
 
 	if (pageData.version !== undefined) currentVersion = pageData.version;
-	currentPage = pageData;
+	setCurrentPage(pageData);
 
 	try {
 		options.adapter.update(mod.default, pageData.props);
@@ -490,9 +567,20 @@ function loadDeferredProps(
  */
 export interface VisitCallbacks {
 	onBefore?(visit: { url: string }): boolean | undefined;
+	/** Receives the handle that cancels the visit while it is in flight. */
+	onCancelToken?(token: { cancel(): void }): void;
+	/** The visit was cancelled through its token. */
+	onCancel?(): void;
+	/** The request is about to be sent. */
+	onStart?(visit: { url: string }): void;
 	/** The answer is in and about to replace what is on screen. */
 	onBeforeUpdate?(page: PhotonPageData): void;
 	onSuccess?(page: PhotonPageData): void;
+	/**
+	 * The page came back with validation errors (scoped to `errorBag` when
+	 * given): called instead of `onSuccess`.
+	 */
+	onError?(errors: Record<string, unknown>): void;
 	/** Always last: `completed` is false when the visit was dropped or failed. */
 	onFinish?(visit: { url: string; completed: boolean }): void;
 }
@@ -510,21 +598,133 @@ export interface PartialRequest extends VisitCallbacks {
 	/** Scope the validation errors to one form (`x-photon-error-bag`). */
 	errorBag?: string;
 	/** Query parameters added to the URL (a GET visit sends its data there). */
-	data?: Record<string, string | number | boolean>;
+	data?: RequestPayload;
 	/** Keep the page's validation errors instead of taking the server's. */
 	preserveErrors?: boolean;
 	/** Keep the address bar on the current URL whatever URL answered. */
 	preserveUrl?: boolean;
 }
 
-/** `path` with `data` added to its query string. */
-function withQuery(path: string, data: PartialRequest["data"]): string {
-	if (data === undefined || Object.keys(data).length === 0) return path;
+/** The HTTP methods a visit can use. */
+export type Method = "get" | "post" | "put" | "patch" | "delete";
+
+/** What a visit sends: fields, or a ready `FormData`. */
+export type RequestPayload = Record<string, unknown> | FormData;
+
+/**
+ * `path` with `data` merged into its query string, nested keys as
+ * `a[b]=…` and arrays as `a[]=…` — `mergeDataIntoQueryString` in
+ * `@inertiajs/core`, for a GET visit.
+ */
+export function withQuery(
+	path: string,
+	data: RequestPayload | undefined,
+): string {
+	if (data === undefined || data instanceof FormData) return path;
+	if (Object.keys(data).length === 0) return path;
 	const url = new URL(path, "http://photon.invalid");
+	const pairs: Array<[string, string]> = [];
+	const build = (value: unknown, prefix: string): void => {
+		if (value === undefined) return;
+		if (value === null) pairs.push([prefix, ""]);
+		else if (Array.isArray(value)) {
+			for (const item of value) build(item, `${prefix}[]`);
+		} else if (typeof value === "object") {
+			for (const [key, inner] of Object.entries(value)) {
+				build(inner, `${prefix}[${key}]`);
+			}
+		} else pairs.push([prefix, String(value)]);
+	};
 	for (const [key, value] of Object.entries(data)) {
-		url.searchParams.set(key, String(value));
+		url.searchParams.delete(key);
+		build(value, key);
 	}
-	return url.pathname + url.search + url.hash;
+	for (const [key, value] of pairs) url.searchParams.append(key, value);
+	// An absolute URL keeps its origin; a path stays a path.
+	return /^[a-z][a-z\d+\-.]*:/i.test(path)
+		? url.href
+		: url.pathname + url.search + url.hash;
+}
+
+/** Whether `value` holds a file anywhere — which makes a body multipart. */
+function hasFiles(value: unknown): boolean {
+	if (value instanceof Blob) return true;
+	if (typeof FileList !== "undefined" && value instanceof FileList) {
+		return value.length > 0;
+	}
+	if (value instanceof FormData) {
+		return [...value.values()].some((item) => hasFiles(item));
+	}
+	if (typeof value === "object" && value !== null) {
+		return Object.values(value).some((item) => hasFiles(item));
+	}
+	return false;
+}
+
+/**
+ * `data` as a multipart form — `objectToFormData` in `@inertiajs/core`:
+ * nested keys as `a[b]`, arrays as `a[]`, booleans as 1/0, dates as ISO.
+ */
+function toFormData(data: Record<string, unknown>): FormData {
+	const form = new FormData();
+	const append = (key: string, value: unknown): void => {
+		if (Array.isArray(value)) {
+			for (const item of value) append(`${key}[]`, item);
+		} else if (value instanceof Date) form.append(key, value.toISOString());
+		else if (value instanceof File) form.append(key, value, value.name);
+		else if (value instanceof Blob) form.append(key, value);
+		else if (typeof value === "boolean") form.append(key, value ? "1" : "0");
+		else if (typeof value === "string") form.append(key, value);
+		else if (typeof value === "number") form.append(key, String(value));
+		else if (value === null || value === undefined) form.append(key, "");
+		else if (typeof FileList !== "undefined" && value instanceof FileList) {
+			for (const file of value) form.append(`${key}[]`, file, file.name);
+		} else if (typeof value === "object") {
+			for (const [inner, item] of Object.entries(value)) {
+				append(`${key}[${inner}]`, item);
+			}
+		}
+	};
+	for (const [key, value] of Object.entries(data)) append(key, value);
+	return form;
+}
+
+/**
+ * The CSRF token for a same-origin request: the `XSRF-TOKEN` cookie the server
+ * seeds, sent back as `X-XSRF-TOKEN` — what Inertia's HTTP client does, and
+ * what Ream's CSRF middleware reads. Never to another origin.
+ */
+function xsrfHeader(url: string): Record<string, string> {
+	if (typeof document === "undefined") return {};
+	try {
+		if (new URL(url, location.href).origin !== location.origin) return {};
+	} catch {
+		return {};
+	}
+	for (const part of document.cookie.split(";")) {
+		const [name, ...rest] = part.trim().split("=");
+		if (name === "XSRF-TOKEN") {
+			return { "X-XSRF-TOKEN": decodeURIComponent(rest.join("=")) };
+		}
+	}
+	return {};
+}
+
+/**
+ * The validation errors on `page`, scoped to `errorBag` when one was used —
+ * non-empty means the visit failed validation.
+ */
+function errorsOf(
+	page: PhotonPageData,
+	errorBag: string | undefined,
+): Record<string, unknown> {
+	const errors: unknown = page.props.errors;
+	if (typeof errors !== "object" || errors === null) return {};
+	const scoped: unknown =
+		errorBag !== undefined && errorBag !== ""
+			? Reflect.get(errors, errorBag)
+			: errors;
+	return typeof scoped === "object" && scoped !== null ? { ...scoped } : {};
 }
 
 /** Whether `request` names props at all — what makes a visit a partial one. */
@@ -553,11 +753,14 @@ async function fetchPartial(
 	flags: { background: boolean },
 ): Promise<boolean> {
 	if (request.onBefore?.({ url }) === false) return false;
+	const visit = describeVisit(url, request, true);
+	announceVisit("start", visit);
 	let completed = false;
 	try {
 		completed = await applyPartial(page, url, request, options, seq, flags);
 		return completed;
 	} finally {
+		announceVisit("finish", visit);
 		request.onFinish?.({ url, completed });
 	}
 }
@@ -668,9 +871,15 @@ async function applyPartial(
 		...(loaded.deferredProps !== undefined
 			? { deferredProps: loaded.deferredProps }
 			: {}),
+		// A prop asked for again is no longer rescued unless the answer says so.
+		rescuedProps: mergeRescuedProps(
+			current.rescuedProps,
+			loaded.rescuedProps,
+			request,
+		),
 	};
 	request.onBeforeUpdate?.(next);
-	currentPage = next;
+	setCurrentPage(next);
 	try {
 		options.adapter.update(mod.default, next.props);
 	} catch (err) {
@@ -707,10 +916,52 @@ function announceSuccess(page: PhotonPageData): void {
 	);
 }
 
+/** A visit as the router events describe it. */
+export interface Visit {
+	url: string;
+	only: string[];
+	except: string[];
+	reset: string[];
+	/** True for a visit that stays on the page: a partial or plain reload. */
+	preserveState: boolean;
+}
+
 /** The router events a page can listen to, with what their `detail` carries. */
 export interface RouterEvents {
+	error: { errors: Record<string, unknown> };
+	start: { visit: Visit };
+	finish: { visit: Visit };
 	success: { page: PhotonPageData };
 	flash: { flash: object };
+}
+
+/** `photon:error` on `document`, as `inertia:error` — a visit came back with errors. */
+function announceErrors(errors: Record<string, unknown>): void {
+	if (typeof document === "undefined") return;
+	document.dispatchEvent(
+		new CustomEvent("photon:error", { detail: { errors } }),
+	);
+}
+
+function announceVisit(type: "start" | "finish", visit: Visit): void {
+	if (typeof document === "undefined") return;
+	document.dispatchEvent(
+		new CustomEvent(`photon:${type}`, { detail: { visit } }),
+	);
+}
+
+function describeVisit(
+	url: string,
+	request: PartialRequest,
+	preserveState: boolean,
+): Visit {
+	return {
+		url,
+		only: request.only ?? [],
+		except: request.except ?? [],
+		reset: request.reset ?? [],
+		preserveState,
+	};
 }
 
 /** Writes to `history.state` from `remember`, one after the other. */
@@ -774,6 +1025,50 @@ export function announceFlash(flash: unknown): void {
 	);
 }
 
+/**
+ * The props whose deferred resolver failed, after a partial answer —
+ * `mergeRescuedProps` in `@inertiajs/core`: a prop this request asked for
+ * drops out, and the answer's own rescued props join.
+ */
+function mergeRescuedProps(
+	current: string[] | undefined,
+	incoming: string[] | undefined,
+	request: PartialRequest,
+): string[] {
+	const visit = describeVisit("", request, true);
+	const kept = (current ?? []).filter(
+		(prop) => !partialReloadRequestsProp(visit, prop),
+	);
+	return [...new Set([...kept, ...(incoming ?? [])])];
+}
+
+/** `path` is `candidate` or lies under it. */
+function isPathOrSubPath(path: string, candidate: string): boolean {
+	return path === candidate || path.startsWith(`${candidate}.`);
+}
+
+/**
+ * Whether a partial `visit` resolves `prop` — `partialReloadRequestsProp` in
+ * `@inertiajs/core`. A visit naming no props requests none of them partially.
+ */
+export function partialReloadRequestsProp(visit: Visit, prop: string): boolean {
+	const { only, except } = visit;
+	if (only.length === 0 && except.length === 0) return false;
+	if (
+		only.length > 0 &&
+		!only.some((candidate) => isPathOrSubPath(prop, candidate))
+	) {
+		return false;
+	}
+	if (
+		except.length > 0 &&
+		except.some((candidate) => isPathOrSubPath(prop, candidate))
+	) {
+		return false;
+	}
+	return true;
+}
+
 /** A comma-separated list header, or nothing when the list is absent. */
 function listHeader(
 	name: string,
@@ -789,8 +1084,14 @@ function listHeader(
  * a GET navigation uses, under the same names.
  */
 export interface VisitOptions extends PartialRequest {
+	/** The HTTP method. Default `get`. */
+	method?: Method;
+	/** Send `data` as multipart even without a file in it. */
+	forceFormData?: boolean;
 	/** Replace the current history entry instead of adding one. */
 	replace?: boolean;
+	/** Stay on the page: reported on the visit, as `router.reload()` sets it. */
+	preserveState?: boolean;
 }
 
 /**
@@ -823,12 +1124,14 @@ export const router = {
 			}
 			return;
 		}
+		const method = visitOptions.method ?? "get";
+		// A GET sends its data in the query; any other method in its body.
 		const path = withQuery(
 			resolved.pathname + resolved.search + resolved.hash,
-			visitOptions.data,
+			method === "get" ? visitOptions.data : undefined,
 		);
 		const page = currentPage;
-		if (isPartial(visitOptions) && page !== undefined) {
+		if (method === "get" && isPartial(visitOptions) && page !== undefined) {
 			await fetchPartial(
 				page,
 				path,
@@ -850,7 +1153,49 @@ export const router = {
 		await router.visit(page.url, {
 			...request,
 			replace: true,
+			preserveState: true,
 			headers: { ...request.headers, "cache-control": "no-cache" },
+		});
+	},
+
+	/** `visit(url, { method: "get", data })`. */
+	get(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+		return router.visit(url, { ...options, method: "get", data });
+	},
+
+	/** A POST visit; state is kept on the page, as Inertia's `router.post`. */
+	post(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+		return router.visit(url, {
+			preserveState: true,
+			...options,
+			method: "post",
+			data,
+		});
+	},
+
+	put(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+		return router.visit(url, {
+			preserveState: true,
+			...options,
+			method: "put",
+			data,
+		});
+	},
+
+	patch(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+		return router.visit(url, {
+			preserveState: true,
+			...options,
+			method: "patch",
+			data,
+		});
+	},
+
+	delete(url: string, options: VisitOptions = {}) {
+		return router.visit(url, {
+			preserveState: true,
+			...options,
+			method: "delete",
 		});
 	},
 
@@ -878,10 +1223,10 @@ export const router = {
 	remember(data: unknown, key = "default"): void {
 		const page = currentPage;
 		if (page === undefined) return;
-		currentPage = {
+		setCurrentPage({
 			...page,
 			rememberedState: { ...page.rememberedState, [key]: data },
-		};
+		});
 		rewriteHistoryEntry();
 	},
 
@@ -898,7 +1243,7 @@ export const router = {
 	replace({ url }: { url: string }): void {
 		const page = currentPage;
 		if (page === undefined || !isSafeNavigationUrl(url)) return;
-		currentPage = { ...page, url };
+		setCurrentPage({ ...page, url });
 		rewriteHistoryEntry();
 	},
 };
@@ -1022,6 +1367,8 @@ function parsePageData(value: unknown): PhotonPageData | null {
 		const names = readStringList(obj[label]);
 		if (names !== undefined) out[label] = names;
 	}
+	const rescued = readStringList(obj.rescuedProps);
+	if (rescued !== undefined) out.rescuedProps = rescued;
 	const onceProps = readOnceProps(obj.onceProps);
 	if (onceProps !== undefined) out.onceProps = onceProps;
 	const scrollProps = readScrollProps(obj.scrollProps);
@@ -1104,7 +1451,7 @@ export function readOnceProps(
 }
 
 /** The page fields that say how a partial reload's props combine. */
-const MERGE_LABELS = [
+export const MERGE_LABELS = [
 	"mergeProps",
 	"prependProps",
 	"deepMergeProps",

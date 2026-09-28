@@ -38,7 +38,8 @@
 					"style": { "useConst": "off", "useImportType": "off" },
 					"correctness": {
 						"noUnusedVariables": "off",
-						"noUnusedImports": "off"
+						"noUnusedImports": "off",
+						"useHookAtTopLevel": "off"
 					}
 				}
 			}

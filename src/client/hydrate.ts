@@ -28,6 +28,7 @@ import type { OncePropMeta } from "./mergeProps.js";
 import {
 	announceFlash,
 	bootRouter,
+	primeCurrentPage,
 	type ResolveComponent,
 	readDeferredProps,
 	readOnceProps,
@@ -78,6 +79,8 @@ export interface PhotonPageData {
 	scrollProps?: Record<string, ScrollPropMeta>;
 	/** What `router.remember()` kept for this page, by key. */
 	rememberedState?: Record<string, unknown>;
+	/** Deferred props whose resolver failed and was rescued by the server. */
+	rescuedProps?: string[];
 }
 
 /** Where a scroll prop is, and which pages come before and after it. */
@@ -181,6 +184,18 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 		return;
 	}
 
+	// A reload of the tab keeps what the page remembered: the entry it
+	// overwrites belonged to this very page. Read before the key can be
+	// cleared below, and before the first render, which may restore it.
+	if (typeof history !== "undefined") {
+		const previous: unknown = await readHistoryState(history.state);
+		const remembered = rememberedStateOf(previous, pageData);
+		if (remembered !== undefined) pageData.rememberedState = remembered;
+	}
+	// The page is known to the router before the framework renders it, so
+	// `usePage()` reads during hydration the page the server rendered.
+	primeCurrentPage(pageData);
+
 	const componentModule = await options.resolveComponent(pageData.component);
 	const Component = componentModule.default;
 
@@ -198,12 +213,6 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 		typeof history !== "undefined" &&
 		typeof history.replaceState === "function"
 	) {
-		// A reload of the tab keeps what the page remembered: the entry it
-		// overwrites belonged to this very page. Read before the key can be
-		// cleared below.
-		const previous: unknown = await readHistoryState(history.state);
-		const remembered = rememberedStateOf(previous, pageData);
-		if (remembered !== undefined) pageData.rememberedState = remembered;
 		// Through `toHistoryState`, so a first page that asks for encryption is
 		// never stored in the clear — and a login page reached after logout,
 		// carrying `clearHistory`, drops the key before anything else is stored.
@@ -341,6 +350,10 @@ function validatePageData(value: unknown): PhotonPageData {
 		(value as Record<string, unknown>).scrollProps,
 	);
 	if (scrollProps !== undefined) out.scrollProps = scrollProps;
+	const rescued = (value as Record<string, unknown>).rescuedProps;
+	if (Array.isArray(rescued) && rescued.every((p) => typeof p === "string")) {
+		out.rescuedProps = rescued;
+	}
 
 	return out;
 }

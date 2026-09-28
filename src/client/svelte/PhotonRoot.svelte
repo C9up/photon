@@ -10,11 +10,18 @@
 
   The shape of `App.svelte` in `@inertiajs/svelte`: a `$state` page, a dynamic
   component. The server renders it too (see the SSR entry in the docs), so the
-  markup the client hydrates is the markup this component produces.
+  markup the client hydrates is the markup this component produces. Given the
+  whole `page` there, it also makes it what `usePage()` returns while the page
+  renders, as `App.svelte` does.
 -->
 <script>
-/** @type {{ component: unknown; props: Record<string, unknown> }} */
-let { component, props } = $props();
+import { setPage as setCurrentPage } from "./page.svelte.js";
+
+/** @type {{ component: unknown; props: Record<string, unknown>; page?: Record<string, unknown> }} */
+let { component, props, page: fullPage } = $props();
+
+// svelte-ignore state_referenced_locally
+if (fullPage !== undefined) setCurrentPage(fullPage);
 
 // svelte-ignore state_referenced_locally
 let page = $state({ component, props });
