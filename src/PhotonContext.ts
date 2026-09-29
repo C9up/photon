@@ -64,7 +64,8 @@ export interface PhotonContext {
 	 */
 	clearHistory(): void;
 	/**
-	 * Encrypt the history state the client stores for this response.
+	 * Encrypt the history state the client stores for this response, or
+	 * (with `false`) not, whatever the config's `encryptHistory` says.
 	 *
 	 * Worth it wherever a page holds data that should not sit in the browser's
 	 * history after the user signs out.
@@ -114,7 +115,7 @@ export function createPhotonContext(
 	let accumulated: MetaTags | undefined;
 	let shared: Record<string, unknown> = {};
 	let shouldClearHistory = false;
-	let shouldEncryptHistory = false;
+	let shouldEncryptHistory = renderer.encryptsHistory();
 	let flashProvider: (() => unknown) | undefined;
 	// Set by `location()`, consumed once by the middleware.
 	let redirectTo: string | undefined;

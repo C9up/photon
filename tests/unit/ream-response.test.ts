@@ -17,7 +17,6 @@ import {
 const config = {
 	framework: "react" as const,
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
 };
 
 function makeCtx(headers: Record<string, string>): {

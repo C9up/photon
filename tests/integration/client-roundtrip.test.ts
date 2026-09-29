@@ -31,7 +31,7 @@ describe("photon/client > integration roundtrip", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "resources/app.tsx",
-			entryServer: "resources/ssr.tsx",
+			ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
 		});
 		const initial = await renderer.render("Home", { greeting: "hi" }, "/start");
 		document.documentElement.innerHTML = initial.html;
@@ -109,7 +109,7 @@ describe("photon/client > integration roundtrip", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
+			ssr: { enabled: true, entrypoint: "ssr.tsx" },
 		});
 		// The user's "props" intentionally contain an HTML-tag-like substring.
 		const dangerous = "<script>alert(1)</script>";

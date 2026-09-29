@@ -150,7 +150,7 @@ async function seedRouteMeta(
  * Create the Photon middleware for the Ream pipeline.
  *
  * Usage:
- *   const photon = PhotonMiddleware({ framework: 'react', entryClient: '...', entryServer: '...' })
+ *   const photon = PhotonMiddleware({ framework: 'react', entryClient: '...', ssr: { enabled: true, entrypoint: '...' } })
  *   app.use(photon.middleware())
  */
 /** A comma-separated header list, trimmed and without empties. */

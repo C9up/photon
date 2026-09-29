@@ -22,7 +22,6 @@ import {
 const base: PhotonConfig = {
 	framework: "react",
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
 };
 
 /** A context shaped like the one the middleware serves a request on. */
@@ -56,7 +55,8 @@ describe("photon > ssr.pages receives the request", () => {
 		const renderer = new PhotonRenderer({
 			...base,
 			ssr: {
-				pages: (_component, ctx) => {
+				enabled: true,
+				pages: (ctx) => {
 					seen = ctx;
 					return true;
 				},
@@ -73,8 +73,9 @@ describe("photon > ssr.pages receives the request", () => {
 		const renderer = new PhotonRenderer({
 			...base,
 			ssr: {
+				enabled: true,
 				// Reads straight off the context — that it typechecks IS the point.
-				pages: (_component, ctx) =>
+				pages: (ctx) =>
 					/bot|crawler/i.test(ctx?.request?.header("user-agent") ?? ""),
 			},
 		});
@@ -104,7 +105,8 @@ describe("photon > ssr.pages receives the request", () => {
 		const renderer = new PhotonRenderer({
 			...base,
 			ssr: {
-				pages: async (_component, ctx) => {
+				enabled: true,
+				pages: async (ctx) => {
 					const id = ctx?.request?.header("x-request-id");
 					// The two predicates overlap: this one yields while the other
 					// runs. Each still sees its own request.
@@ -133,10 +135,13 @@ describe("photon > ssr.pages receives the request", () => {
 		expect([...seen].sort()).toEqual(["a", "b"]);
 	});
 
-	it("still works for a predicate that ignores the context", async () => {
+	it("hands the predicate no context for a render outside the pipeline", async () => {
 		const renderer = new PhotonRenderer({
 			...base,
-			ssr: { pages: (component) => component === "Home" },
+			ssr: {
+				enabled: true,
+				pages: (ctx, page) => ctx === undefined && page === "Home",
+			},
 		});
 		const context = createPhotonContext(renderer, "/", undefined);
 		expect(await context.ssrEnabled("Home")).toBe(true);
@@ -150,7 +155,8 @@ describe("photon > the middleware is what supplies the context", () => {
 		const mw = new PhotonMiddleware({
 			...base,
 			ssr: {
-				pages: (_component, ctx) => {
+				enabled: true,
+				pages: (ctx) => {
 					seen = ctx;
 					return true;
 				},

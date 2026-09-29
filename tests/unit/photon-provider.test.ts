@@ -45,7 +45,7 @@ describe("photon > PhotonProvider", () => {
 			photon: {
 				framework: "react",
 				entryClient: "resources/app.tsx",
-				entryServer: "resources/ssr.tsx",
+				ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
 			},
 		});
 		new PhotonProvider(app).register();
@@ -59,7 +59,7 @@ describe("photon > PhotonProvider", () => {
 			photon: {
 				framework: "vue",
 				entryClient: "resources/app.ts",
-				entryServer: "resources/ssr.ts",
+				ssr: { enabled: true, entrypoint: "resources/ssr.ts" },
 			},
 		});
 		new PhotonProvider(app).register();
@@ -81,7 +81,7 @@ describe("photon > PhotonProvider", () => {
 			photon: {
 				framework: "react",
 				entryClient: "resources/app.tsx",
-				entryServer: "resources/ssr.tsx",
+				ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
 			},
 		});
 		const provider = new PhotonProvider(app);

@@ -71,7 +71,6 @@ async function serve(
 	const middleware = new PhotonMiddleware({
 		framework: "react",
 		entryClient: "resources/app.tsx",
-		entryServer: "resources/ssr.tsx",
 	}).middleware();
 	await middleware(ctx, () =>
 		handle(ctx, method, url.pathname, body, response),

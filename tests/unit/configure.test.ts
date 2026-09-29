@@ -73,6 +73,6 @@ describe("photon > configure", () => {
 		expect(file?.content).toContain("defineConfig");
 		expect(file?.content).toContain("framework: 'react'");
 		expect(file?.content).toContain("entryClient: 'resources/app.tsx'");
-		expect(file?.content).toContain("entryServer: 'resources/ssr.tsx'");
+		expect(file?.content).toContain("entrypoint: 'resources/ssr.tsx'");
 	});
 });

@@ -12,7 +12,7 @@ import {
 const baseConfig: PhotonConfig = {
 	framework: "react",
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
+	ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
 };
 
 describe("photon > PhotonRenderer > render() in dev mode (no SSR module)", () => {
@@ -184,6 +184,13 @@ describe("photon > PhotonRenderer > renderProps()", () => {
 		});
 	});
 
+	it("sends a fixed assetsVersion instead of the manifest fingerprint", async () => {
+		const r = new PhotonRenderer({ ...baseConfig, assetsVersion: 42 });
+		expect(r.getVersion()).toBe("42");
+		const page = await r.render("Home", {}, "/");
+		expect(page.html).toContain('"version":"42"');
+	});
+
 	it("getFramework returns the configured framework", () => {
 		expect(new PhotonRenderer(baseConfig).getFramework()).toBe("react");
 		expect(
@@ -219,10 +226,10 @@ describe("photon > PhotonRenderer > boot() validation", () => {
 		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
 	});
 
-	it("rejects entryServer with path traversal", async () => {
+	it("rejects an ssr.entrypoint with path traversal", async () => {
 		const r = new PhotonRenderer({
 			...baseConfig,
-			entryServer: "../etc/passwd",
+			ssr: { enabled: true, entrypoint: "../etc/passwd" },
 		});
 		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
 	});
@@ -241,9 +248,24 @@ describe("photon > PhotonRenderer > boot() validation", () => {
 		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
 	});
 
+	it("boots without an SSR bundle when SSR is off", async () => {
+		await fsp.mkdir(path.join(cwd, "public/build/.vite"), { recursive: true });
+		await fsp.writeFile(
+			path.join(cwd, "public/build/.vite/manifest.json"),
+			JSON.stringify({
+				"resources/app.tsx": { file: "assets/app.js", isEntry: true },
+			}),
+		);
+		const r = new PhotonRenderer({ ...baseConfig, ssr: undefined });
+		await r.boot();
+		const page = await r.render("Home", {}, "/");
+		expect(page.html).toContain('<div id="app"></div>');
+		expect(page.html).toContain("/build/assets/app.js");
+	});
+
 	it("boot() in dev mode returns immediately without filesystem checks", async () => {
 		process.env.NODE_ENV = "development";
-		const r = new PhotonRenderer(baseConfig);
+		const r = new PhotonRenderer({ ...baseConfig, ssr: undefined });
 		await expect(r.boot()).resolves.toBeUndefined();
 	});
 });

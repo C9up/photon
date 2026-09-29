@@ -21,7 +21,7 @@ const config = (appRoot: string): PhotonConfig => ({
 	entryClient: "resources/app.tsx",
 	// Plain TypeScript: the point is that Vite COMPILES it, without pulling a
 	// framework plugin into this test.
-	entryServer: "resources/ssr.ts",
+	ssr: { enabled: true, entrypoint: "resources/ssr.ts" },
 	appRoot,
 });
 

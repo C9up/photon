@@ -11,7 +11,6 @@ import { PhotonMiddleware } from "../../src/PhotonMiddleware.js";
 const baseConfig = {
 	framework: "react" as const,
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
 };
 
 function harness(

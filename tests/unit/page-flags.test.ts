@@ -6,15 +6,15 @@
 import { describe, expect, it } from "vitest";
 import { createPhotonContext } from "../../src/PhotonContext.js";
 import { getValidationErrors } from "../../src/PhotonMiddleware.js";
-import { PhotonRenderer } from "../../src/PhotonRenderer.js";
+import { PhotonRenderer, type SsrConfig } from "../../src/PhotonRenderer.js";
 
-function context() {
+function context(encryptHistory?: boolean) {
 	// The renderer is never booted here: these assertions are about the flags
 	// the context accumulates, not about rendering.
 	const renderer = new PhotonRenderer({
 		framework: "react",
 		entryClient: "app.tsx",
-		entryServer: "ssr.tsx",
+		encryptHistory,
 	});
 	return createPhotonContext(renderer, "/");
 }
@@ -39,6 +39,18 @@ describe("photon > history flags", () => {
 	it("lets encryption be turned back off", async () => {
 		const ctx = context();
 		ctx.encryptHistory(true);
+		ctx.encryptHistory(false);
+		expect(await ctx.resolvePageFlags()).toEqual({});
+	});
+
+	it("encrypts every page when the config says so", async () => {
+		expect(await context(true).resolvePageFlags()).toEqual({
+			encryptHistory: true,
+		});
+	});
+
+	it("lets a request turn the config's encryption off for itself", async () => {
+		const ctx = context(true);
 		ctx.encryptHistory(false);
 		expect(await ctx.resolvePageFlags()).toEqual({});
 	});
@@ -70,33 +82,33 @@ describe("photon > flash", () => {
 });
 
 describe("photon > per-page SSR", () => {
-	const renderer = (ssr?: {
-		enabled?: boolean;
-		pages?: string[] | ((c: string) => boolean);
-	}): PhotonRenderer =>
-		new PhotonRenderer({
-			framework: "react",
-			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
-			ssr,
-		});
+	const renderer = (ssr?: SsrConfig): PhotonRenderer =>
+		new PhotonRenderer({ framework: "react", entryClient: "app.tsx", ssr });
 
-	it("renders every page when nothing is configured", async () => {
-		expect(await renderer().ssrEnabled("Anything")).toBe(true);
+	it("renders none when nothing is configured: SSR is off by default", async () => {
+		expect(await renderer().ssrEnabled("Anything")).toBe(false);
 	});
 
 	it("renders none when disabled", async () => {
 		expect(await renderer({ enabled: false }).ssrEnabled("Home")).toBe(false);
 	});
 
+	it("renders every page once enabled", async () => {
+		expect(await renderer({ enabled: true }).ssrEnabled("Anything")).toBe(true);
+	});
+
 	it("narrows to a list of pages", async () => {
-		const r = renderer({ pages: ["Home"] });
+		const r = renderer({ enabled: true, pages: ["Home"] });
 		expect(await r.ssrEnabled("Home")).toBe(true);
 		expect(await r.ssrEnabled("Dashboard")).toBe(false);
 	});
 
 	it("narrows by predicate", async () => {
-		const r = renderer({ pages: (c) => c.startsWith("Public/") });
+		const r = renderer({
+			enabled: true,
+			// Asked outside a request, the predicate gets no context.
+			pages: (ctx, page) => ctx === undefined && page.startsWith("Public/"),
+		});
 		expect(await r.ssrEnabled("Public/Landing")).toBe(true);
 		expect(await r.ssrEnabled("Admin/Users")).toBe(false);
 	});

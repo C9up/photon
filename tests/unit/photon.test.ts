@@ -18,7 +18,6 @@ describe("photon > PhotonRenderer", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "resources/app.tsx",
-			entryServer: "resources/ssr.tsx",
 		});
 
 		const result = await renderer.render(
@@ -39,7 +38,6 @@ describe("photon > PhotonRenderer", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
 		});
 
 		const result = await renderer.render(
@@ -56,7 +54,6 @@ describe("photon > PhotonRenderer", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "resources/app.tsx",
-			entryServer: "resources/ssr.tsx",
 			viteDevUrl: "http://localhost:5173",
 		});
 
@@ -72,7 +69,6 @@ describe("photon > PhotonRenderer", () => {
 		const renderer = new PhotonRenderer({
 			framework: "vue",
 			entryClient: "app.ts",
-			entryServer: "ssr.ts",
 		});
 
 		const result = renderer.renderProps("Users", { list: [1, 2, 3] }, "/users");
@@ -88,7 +84,6 @@ describe("photon > PhotonRenderer", () => {
 		const renderer = new PhotonRenderer({
 			framework: "svelte",
 			entryClient: "app.ts",
-			entryServer: "ssr.ts",
 		});
 		expect(renderer.getFramework()).toBe("svelte");
 	});
@@ -97,7 +92,6 @@ describe("photon > PhotonRenderer", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
 		});
 
 		const result = await renderer.render(
@@ -120,7 +114,6 @@ describe("photon > PhotonRenderer", () => {
 		const renderer = new PhotonRenderer({
 			framework: "vue",
 			entryClient: "app.ts",
-			entryServer: "ssr.ts",
 		});
 
 		const result = renderer.renderProps("Orders", { ids: [1, 2] }, "/orders");
@@ -136,7 +129,6 @@ describe("photon > PhotonContext", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
 		});
 
 		const ctx = createPhotonContext(renderer, "/test");
@@ -149,7 +141,6 @@ describe("photon > PhotonContext", () => {
 		const renderer = new PhotonRenderer({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
 		});
 		const ctx = createPhotonContext(renderer, "/test");
 		ctx.share({ sharedKey: "shared-value", overridden: "from-share" });
@@ -170,7 +161,6 @@ describe("photon > PhotonMiddleware", () => {
 		const mw = new PhotonMiddleware({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
 		});
 
 		const ctx: PhotonMiddlewareContext = {
@@ -192,7 +182,6 @@ describe("photon > PhotonMiddleware", () => {
 		const mw = new PhotonMiddleware({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
 		});
 
 		const ctx: PhotonMiddlewareContext = {
@@ -212,7 +201,6 @@ describe("photon > PhotonMiddleware", () => {
 		const mw = new PhotonMiddleware({
 			framework: "react",
 			entryClient: "app.tsx",
-			entryServer: "ssr.tsx",
 		});
 
 		// Method-based response mock matching PhotonMiddlewareContext — the

@@ -12,7 +12,6 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PhotonError } from "../../src/errors.js";
 import {
 	type PageProps,
 	type PhotonConfig,
@@ -23,7 +22,7 @@ import {
 const config: PhotonConfig = {
 	framework: "react",
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
+	ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
 };
 
 /** A compiler that answers with whatever module it is currently holding. */
@@ -91,22 +90,40 @@ describe("photon > dev SSR", () => {
 	it("names the entry point when it exports no render()", async () => {
 		const { server } = fakeCompiler({ notRender: () => "" });
 		const photon = await renderer(server);
-		await expect(photon.render("Home", {}, "/")).rejects.toBeInstanceOf(
-			PhotonError,
-		);
+		await expect(photon.render("Home", {}, "/")).rejects.toMatchObject({
+			code: "E_PHOTON_SSR_LOAD_FAILED",
+			message: "resources/ssr.tsx does not export a render() function",
+		});
 	});
 
-	it("stays client-only when the project has no SSR entry", async () => {
-		// Absence is the feature being off. Starting a compiler here would cost
-		// a module graph and a file watcher to produce nothing, on every project
-		// that renders purely on the client.
-		const root = await mkdtemp(join(tmpdir(), "photon-no-ssr-"));
-		const photon = new PhotonRenderer({ ...config, appRoot: root });
+	it("starts no compiler and stays client-only when SSR is off", async () => {
+		// Starting a compiler here would cost a module graph and a file watcher
+		// to produce nothing, on every project that renders on the client only.
+		const { server, state } = fakeCompiler({
+			render: () => "<main>ssr</main>",
+		});
+		const photon = new PhotonRenderer({
+			framework: "react",
+			entryClient: "resources/app.tsx",
+		}).useDevServer(server);
 		await photon.boot();
 		const result = await photon.render("Home", {}, "/");
 		expect(result.html).toContain('id="app"');
 		expect(result.html).not.toContain("<main>");
+		expect(state.loads).toBe(0);
 		await photon.close();
+	});
+
+	it("fails the server render when SSR is enabled and the entry does not exist", async () => {
+		// Turned on explicitly, a missing entry is a mistake to hear about —
+		// not a client-only shell nobody notices is not server-rendered.
+		const root = await mkdtemp(join(tmpdir(), "photon-no-ssr-"));
+		const photon = new PhotonRenderer({ ...config, appRoot: root });
+		await photon.boot();
+		await expect(photon.render("Home", {}, "/")).rejects.toMatchObject({
+			code: "E_PHOTON_SSR_LOAD_FAILED",
+			message: "SSR is enabled but resources/ssr.tsx does not exist",
+		});
 	});
 
 	it("releases the compiler on close", async () => {

@@ -4,7 +4,7 @@ import { type PhotonConfig, PhotonRenderer } from "../../src/PhotonRenderer.js";
 const baseConfig: PhotonConfig = {
 	framework: "react",
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
+	ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
 };
 
 describe("photon > PhotonRenderer > head injection", () => {

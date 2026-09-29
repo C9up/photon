@@ -8,7 +8,6 @@ import { PhotonRenderer } from "../../src/PhotonRenderer.js";
 const baseConfig = {
 	framework: "react" as const,
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
 };
 
 function makeCtx(opts: {

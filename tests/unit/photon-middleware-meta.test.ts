@@ -8,7 +8,6 @@ import { Meta } from "../../src/seo/MetaDecorator.js";
 const baseConfig = {
 	framework: "react" as const,
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
 };
 
 interface CapturedResponse {

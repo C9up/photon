@@ -43,21 +43,30 @@ export interface PageFlags {
  */
 export type SsrRequestContext = PhotonMiddlewareContext;
 
-/** Which pages to server-render. */
+/** Server rendering: off unless enabled, and then for which pages. */
 export interface SsrConfig<Ctx = SsrRequestContext> {
-	/** Off entirely when false. Defaults to true when an SSR entry exists. */
+	/** Server-render pages. Off by default. */
 	enabled?: boolean;
+	/**
+	 * The entry point that renders a page on the server
+	 * (default: 'resources/ssr.tsx').
+	 *
+	 * Compiled by Vite's own SSR loader in development; in production, the
+	 * bundle built from it is loaded from {@link PhotonConfig.ssrBuildDir}.
+	 */
+	entrypoint?: string;
 	/**
 	 * Restrict SSR to these components, by list or by predicate.
 	 *
-	 * The predicate receives the HTTP context alongside the component, as
-	 * upstream's does, so a decision can turn on the request — a header, the
-	 * authenticated user, a feature flag. The renderer stays a singleton: the
-	 * context is passed through per call and never stored on it.
+	 * The predicate receives the HTTP context, then the component, so a
+	 * decision can turn on the request — a header, the authenticated user, a
+	 * feature flag. The context is undefined only for a render outside the
+	 * HTTP pipeline. The renderer stays a singleton: the context is passed
+	 * through per call and never stored on it.
 	 */
 	pages?:
 		| string[]
-		| ((component: string, ctx?: Ctx) => boolean | Promise<boolean>);
+		| ((ctx: Ctx | undefined, page: string) => boolean | Promise<boolean>);
 }
 
 export interface PhotonConfig<Ctx = SsrRequestContext> {
@@ -65,8 +74,6 @@ export interface PhotonConfig<Ctx = SsrRequestContext> {
 	framework: Framework;
 	/** Path to the frontend entry point (e.g., 'resources/app.tsx'). */
 	entryClient: string;
-	/** Path to the SSR entry point (e.g., 'resources/ssr.tsx'). */
-	entryServer: string;
 	/** Where the client build is written, on disk (default: 'public/build'). */
 	buildDir?: string;
 	/**
@@ -95,8 +102,18 @@ export interface PhotonConfig<Ctx = SsrRequestContext> {
 	 * on top — last wins per leaf field.
 	 */
 	defaultMeta?: MetaTags;
-	/** Which pages to server-render. Every page, unless narrowed here. */
+	/** Server rendering. Off unless `ssr.enabled` is true. */
 	ssr?: SsrConfig<Ctx>;
+	/**
+	 * Encrypt the history state of every page (default: false). A request
+	 * turns it on or off for itself with `ctx.photon.encryptHistory()`.
+	 */
+	encryptHistory?: boolean;
+	/**
+	 * A fixed asset version. Without it, the version is a fingerprint of the
+	 * Vite manifest.
+	 */
+	assetsVersion?: string | number;
 	/**
 	 * The application root, against which {@link buildDir} is resolved.
 	 *
@@ -184,7 +201,7 @@ export class PhotonRenderer {
 	 * Install a server-rendering module directly, instead of loading one from
 	 * the build output.
 	 *
-	 * `boot()` normally reads it from `entryServer`, which needs a real build on
+	 * `boot()` normally reads it from `ssr.entrypoint`, which needs a real build on
 	 * disk. A host that already holds the module — and a test exercising the
 	 * render path — hands it over here rather than reaching into the instance:
 	 * the field is genuinely private, so there is nothing to reach into.
@@ -236,13 +253,28 @@ export class PhotonRenderer {
 	 * that does installs the dependency it was always going to need.
 	 */
 	async #bootDev(): Promise<void> {
+		// SSR off means no compiler: it would cost a module graph and a watcher
+		// to produce nothing.
+		if (this.#config.ssr?.enabled !== true) return;
 		if (this.#devServer === undefined) {
-			// No SSR entry on disk means this project does not server-render, and
-			// starting a compiler for it would cost a module graph and a watcher
-			// to produce nothing. Absence is the feature being off; a PRESENT
-			// entry that fails to compile is an error worth hearing about, and
-			// stays one.
-			if (!(await this.#hasSsrEntry())) return;
+			// Turned on with no entry on disk: every server render fails and
+			// says why, rather than falling back to a shell nobody notices is
+			// not server-rendered. No compiler is started for it.
+			if (!(await this.#hasSsrEntry())) {
+				const entrypoint = this.#ssrEntrypoint();
+				this.#ssrModule = {
+					render: () => {
+						throw new PhotonError(
+							"E_PHOTON_SSR_LOAD_FAILED",
+							`SSR is enabled but ${entrypoint} does not exist`,
+							{
+								hint: "Create the SSR entry point, point ssr.entrypoint at it, or turn ssr.enabled off.",
+							},
+						);
+					},
+				};
+				return;
+			}
 			const vite = await loadVite();
 			if (vite === undefined) return;
 			try {
@@ -267,13 +299,13 @@ export class PhotonRenderer {
 		this.#ssrModule = {
 			render: async (page: PageProps): Promise<string> => {
 				const loaded = await server.ssrLoadModule(
-					`/${this.#config.entryServer.replace(/^\/+/, "")}`,
+					`/${this.#ssrEntrypoint().replace(/^\/+/, "")}`,
 				);
 				const render = pickRender(loaded);
 				if (render === undefined) {
 					throw new PhotonError(
 						"E_PHOTON_SSR_LOAD_FAILED",
-						`${this.#config.entryServer} does not export a render() function`,
+						`${this.#ssrEntrypoint()} does not export a render() function`,
 						{ hint: "Export `render(page)` from the SSR entry point." },
 					);
 				}
@@ -286,11 +318,15 @@ export class PhotonRenderer {
 	async #hasSsrEntry(): Promise<boolean> {
 		const root = path.resolve(this.#config.appRoot ?? process.cwd());
 		try {
-			await access(path.join(root, this.#config.entryServer));
+			await access(path.join(root, this.#ssrEntrypoint()));
 			return true;
 		} catch {
 			return false;
 		}
+	}
+
+	#ssrEntrypoint(): string {
+		return this.#config.ssr?.entrypoint ?? "resources/ssr.tsx";
 	}
 
 	/**
@@ -348,13 +384,15 @@ export class PhotonRenderer {
 				);
 			}
 			const entryPattern = /^[\w./\-@#]+\.(tsx?|jsx?|vue|svelte)$/;
+			const ssrEnabled = this.#config.ssr?.enabled === true;
 			if (
-				!entryPattern.test(this.#config.entryServer) ||
-				this.#config.entryServer.split("/").includes("..")
+				ssrEnabled &&
+				(!entryPattern.test(this.#ssrEntrypoint()) ||
+					this.#ssrEntrypoint().split("/").includes(".."))
 			) {
 				throw new PhotonError(
 					"E_PHOTON_INVALID_CONFIG",
-					"entryServer path is invalid or contains path traversal",
+					"ssr.entrypoint path is invalid or contains path traversal",
 				);
 			}
 			if (
@@ -400,11 +438,12 @@ export class PhotonRenderer {
 					},
 				);
 			}
-			const ssrModule = await loadSsrModule(
-				absSsrBuildDir,
-				this.#config.entryServer,
-			);
-			this.#ssrModule = ssrModule;
+			if (ssrEnabled) {
+				this.#ssrModule = await loadSsrModule(
+					absSsrBuildDir,
+					this.#ssrEntrypoint(),
+				);
+			}
 			// A manifest that is there but unreadable fails the boot. It used to
 			// be skipped with a warning, and every page then pointed at a
 			// `client.js` the build never wrote: a server that looked healthy and
@@ -471,9 +510,13 @@ export class PhotonRenderer {
 	 * props for JavaScript they no longer have.
 	 *
 	 * `"1"` in development, where there is no manifest and the dev server
-	 * already handles reloading.
+	 * already handles reloading. A fixed `assetsVersion` in the config wins
+	 * over both.
 	 */
 	getVersion(): string {
+		if (this.#config.assetsVersion !== undefined) {
+			return String(this.#config.assetsVersion);
+		}
 		if (this.#cachedVersion !== undefined) return this.#cachedVersion;
 		this.#cachedVersion =
 			this.#manifest === undefined
@@ -487,18 +530,17 @@ export class PhotonRenderer {
 	/**
 	 * Whether `component` is server-rendered.
 	 *
-	 * Off entirely when `ssr.enabled` is false; otherwise narrowed by
-	 * `ssr.pages`, by list or by predicate. Everything is server-rendered when
-	 * neither is configured, which is what an app with an SSR entry expects.
+	 * Off unless `ssr.enabled` is true; then narrowed by `ssr.pages`, by list
+	 * or by predicate, and every page when there is no `pages`.
 	 */
 	async ssrEnabled(
 		component: string,
 		ctx?: SsrRequestContext,
 	): Promise<boolean> {
 		const ssr = this.#config.ssr;
-		if (ssr?.enabled === false) return false;
-		if (typeof ssr?.pages === "function") return ssr.pages(component, ctx);
-		if (ssr?.pages) return ssr.pages.includes(component);
+		if (ssr?.enabled !== true) return false;
+		if (typeof ssr.pages === "function") return ssr.pages(ctx, component);
+		if (ssr.pages) return ssr.pages.includes(component);
 		return true;
 	}
 
@@ -535,6 +577,8 @@ export class PhotonRenderer {
 			try {
 				ssrHtml = await this.#ssrModule.render(pageData);
 			} catch (err) {
+				// Photon's own failure (the entry cannot be loaded) keeps its code.
+				if (err instanceof PhotonError) throw err;
 				// Log the real error internally, give generic message to callers
 				throw new PhotonError(
 					"E_PHOTON_SSR_RENDER_FAILED",
@@ -632,6 +676,11 @@ export class PhotonRenderer {
 				"x-photon": "true",
 			},
 		};
+	}
+
+	/** Whether every page's history state is encrypted unless a request says otherwise. */
+	encryptsHistory(): boolean {
+		return this.#config.encryptHistory ?? false;
 	}
 
 	/**
@@ -832,9 +881,9 @@ function isManifest(
 
 async function loadSsrModule(
 	absSsrBuildDir: string,
-	entryServer: string,
+	entrypoint: string,
 ): Promise<{ render: (page: PageProps) => Promise<string> | string }> {
-	const parsed = path.parse(entryServer);
+	const parsed = path.parse(entrypoint);
 	const candidates = [
 		path.join(absSsrBuildDir, "ssr.js"),
 		path.join(absSsrBuildDir, `${parsed.name}.js`),

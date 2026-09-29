@@ -11,7 +11,7 @@ import { PhotonMiddleware } from '@c9up/photon'
 const photon = new PhotonMiddleware({
   framework: 'react',
   entryClient: 'resources/app.tsx',
-  entryServer: 'resources/ssr.tsx',
+  ssr: { enabled: true, entrypoint: 'resources/ssr.tsx' },
 })
 
 const app = new Ignitor({ port: 3000 })

@@ -18,7 +18,7 @@ import { PhotonRenderer } from "../../src/PhotonRenderer.js";
 const CONFIG = {
 	framework: "react" as const,
 	entryClient: "resources/app.tsx",
-	entryServer: "resources/ssr.tsx",
+	ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
 };
 
 let previousEnv: string | undefined;
