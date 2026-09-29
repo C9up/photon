@@ -11,7 +11,8 @@ function defined<T>(value: T | null | undefined): T {
 }
 
 beforeEach(() => {
-	document.documentElement.innerHTML = '<div id="app">SSR</div>';
+	document.documentElement.innerHTML =
+		'<div id="app" data-server-rendered="true">SSR</div>';
 });
 
 afterEach(() => {
@@ -44,6 +45,28 @@ describe("photon/client/adapters/svelte", () => {
 		expect(call[0]).toBe("PageSvelte");
 		expect(call[1].target).toBe(target);
 		expect(call[1].props).toEqual({ color: "red" });
+	});
+
+	it("mounts when the server rendered nothing", async () => {
+		const hydrateFn = vi.fn();
+		const mount = vi.fn(() => ({ id: "mounted" }));
+		vi.doMock("svelte", () => ({
+			hydrate: hydrateFn,
+			mount,
+			unmount: vi.fn(),
+		}));
+		const { svelteAdapter } = await import(
+			"../../../../src/client/adapters/svelte.js"
+		);
+		const target = defined(document.getElementById("app"));
+		target.removeAttribute("data-server-rendered");
+		await svelteAdapter.hydrate(target, "PageSvelte", { color: "red" });
+
+		expect(hydrateFn).not.toHaveBeenCalled();
+		expect(mount).toHaveBeenCalledWith("PageSvelte", {
+			target,
+			props: { color: "red" },
+		});
 	});
 
 	it("update unmounts the previous instance and mounts the next one", async () => {

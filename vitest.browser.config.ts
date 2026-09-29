@@ -36,6 +36,30 @@ const renderSvelte: BrowserCommand<
 	}).body;
 };
 
+/**
+ * An SSR entry built on `createPhotonApp`, run in Node the same way: what its
+ * default export would give PhotonRenderer for `page`.
+ */
+const renderSvelteApp: BrowserCommand<
+	[page: string, props: Record<string, unknown>, url: string]
+> = async (ctx, page, props, url) => {
+	const vite = ctx.project.vite;
+	const server: {
+		render(c: unknown, o: unknown): { head: string; body: string };
+	} = await vite.ssrLoadModule("svelte/server");
+	const app: { createPhotonApp(options: unknown): Promise<unknown> } =
+		await vite.ssrLoadModule("/src/client/svelte/createPhotonApp.js");
+	const component = await vite.ssrLoadModule(
+		`/tests/browser/fixtures/${page}.svelte`,
+	);
+	return app.createPhotonApp({
+		page: { component: page, framework: "svelte", url, props },
+		resolve: () => component,
+		setup: (options: { App: unknown; props: unknown }) =>
+			server.render(options.App, { props: options.props }),
+	});
+};
+
 export default defineConfig({
 	plugins: [svelte()],
 	// Pre-bundled up front: discovered mid-run, Vite reloads the test page.
@@ -51,7 +75,7 @@ export default defineConfig({
 				launch: executablePath ? { executablePath } : {},
 			}),
 			instances: [{ browser: "chromium" }],
-			commands: { renderSvelte },
+			commands: { renderSvelte, renderSvelteApp },
 		},
 	},
 });

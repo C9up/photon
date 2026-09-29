@@ -1,6 +1,7 @@
 /**
  * React adapter — uses `react-dom/client.hydrateRoot` to take over the
- * SSR-rendered DOM, then re-renders via `root.render()` on SPA navigation.
+ * SSR-rendered DOM (`createRoot` when the server rendered nothing), then
+ * re-renders via `root.render()` on SPA navigation.
  *
  * Dynamic-imports `react` and `react-dom/client` on first call so React-only
  * apps don't pay the Vue / Svelte cost (and Vue / Svelte apps don't fail at
@@ -9,7 +10,11 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import type { PhotonAdapter, PhotonAdapterHandle } from "./types.js";
+import {
+	isServerRendered,
+	type PhotonAdapter,
+	type PhotonAdapterHandle,
+} from "./types.js";
 
 interface ReactRoot {
 	render(node: unknown): void;
@@ -18,6 +23,7 @@ interface ReactRoot {
 
 interface ReactDomClientModule {
 	hydrateRoot(target: Element, node: unknown): ReactRoot;
+	createRoot(target: Element): ReactRoot;
 }
 
 interface ReactModule {
@@ -37,10 +43,14 @@ export const reactAdapter: PhotonAdapter = {
 		const [reactDomClient, react]: [ReactDomClientModule, ReactModule] =
 			await Promise.all([import("react-dom/client"), import("react")]);
 
-		let root: ReactRoot | undefined = reactDomClient.hydrateRoot(
-			target,
-			react.createElement(Component, props),
-		);
+		const element = react.createElement(Component, props);
+		let root: ReactRoot | undefined;
+		if (isServerRendered(target)) {
+			root = reactDomClient.hydrateRoot(target, element);
+		} else {
+			root = reactDomClient.createRoot(target);
+			root.render(element);
+		}
 
 		return {
 			update(NextComponent, nextProps) {

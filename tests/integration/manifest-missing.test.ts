@@ -134,16 +134,15 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 	});
 
 	/** A built app: the SSR bundle where it belongs, and `manifest` as given. */
-	async function writeBuild(manifest: string): Promise<string> {
+	async function writeBuild(
+		manifest: string,
+		bundle = "export function render() { return ''; }",
+	): Promise<string> {
 		const buildDir = path.join(cwd, "public/build");
 		const ssrDir = path.join(cwd, "build/ssr");
 		await fsp.mkdir(path.join(buildDir, ".vite"), { recursive: true });
 		await fsp.mkdir(ssrDir, { recursive: true });
-		await fsp.writeFile(
-			path.join(ssrDir, "ssr.js"),
-			"export function render() { return ''; }",
-			"utf8",
-		);
+		await fsp.writeFile(path.join(ssrDir, "ssr.js"), bundle, "utf8");
 		const manifestPath = path.join(buildDir, ".vite", "manifest.json");
 		await fsp.writeFile(manifestPath, manifest, "utf8");
 		return manifestPath;
@@ -188,6 +187,20 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		await cdn.boot();
 		expect((await cdn.render("Home", {}, "/")).html).toContain(
 			'src="https://cdn.example/app/assets/app-1.js"',
+		);
+	});
+
+	it("loads a bundle whose render is the default export", async () => {
+		await writeBuild(
+			"{}",
+			"export default function render(page) { return { head: ['<title>' + page.component + '</title>'], body: '<main>built</main>' }; }",
+		);
+		const r = new PhotonRenderer(baseConfig);
+		await r.boot();
+		const { html } = await r.render("Home", {}, "/");
+		expect(html).toContain("<title>Home</title>");
+		expect(html).toContain(
+			'<div id="app" data-server-rendered="true"><main>built</main></div>',
 		);
 	});
 

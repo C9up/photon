@@ -1,6 +1,7 @@
 <!--
-  Photon's root for Svelte 5: it renders whichever page it holds, and the
-  router hands it the next one through `setPage`.
+  Photon's root for Svelte 5 — the `App` of `createPhotonApp`: it renders
+  whichever page it holds, and the router hands it the next one, through
+  `setPage` from `hydrate({ svelteRoot })`, or through the app handle.
 
   Svelte 5 has no way, outside a `.svelte` file, to give a mounted component new
   props: they only update through runes. Without this root the adapter had to
@@ -15,6 +16,8 @@
   renders, as `App.svelte` does.
 -->
 <script>
+import { onMount } from "svelte";
+import { connectApp } from "../app.js";
 import { setPage as setCurrentPage } from "./page.svelte.js";
 
 /** @type {{ component: unknown; props: Record<string, unknown>; page?: Record<string, unknown> }} */
@@ -30,6 +33,14 @@ let page = $state({ component, props });
 export function setPage(next) {
 	page = next;
 }
+
+// Mounted by `createPhotonApp`, the router reaches this root through the app
+// handle rather than an adapter; the disconnect runs when it is destroyed.
+onMount(() =>
+	connectApp((component, props) => {
+		page = { component, props };
+	}),
+);
 </script>
 
 <page.component {...page.props} />

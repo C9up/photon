@@ -79,10 +79,12 @@ function setCurrentPage(page: PhotonPageData | undefined): void {
 /**
  * The page about to be hydrated, known before the framework renders it — so a
  * component reading `usePage()` during hydration sees the page the server
- * rendered. `bootRouter` confirms it once the page is up.
+ * rendered. `bootRouter` confirms it once the page is up. Subscribers are
+ * told too: a store created before this (Vue's page ref, by a `usePage()`
+ * called earlier) would otherwise hydrate with no page and mismatch.
  */
 export function primeCurrentPage(page: PhotonPageData): void {
-	currentPage = page;
+	setCurrentPage(page);
 }
 
 /**

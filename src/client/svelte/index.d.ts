@@ -1,4 +1,5 @@
 import type { Component, Snippet } from "svelte";
+import type { PhotonAppSsrResponse, ResolvePage } from "../app.js";
 import type { FormErrors, FormStore } from "../form.js";
 import type { FormComponentOptions, FormSlotProps } from "../formElement.js";
 import type { RouteName } from "../routes.js";
@@ -28,7 +29,50 @@ declare const PhotonRoot: Component<
 	{ setPage(next: { component: unknown; props: Record<string, unknown> }): void }
 >;
 export default PhotonRoot;
-export { PhotonRoot };
+export { PhotonRoot, PhotonRoot as App };
+
+export interface SetupOptions<El> {
+	/** The element the page is in; null on the server. */
+	el: El;
+	App: typeof PhotonRoot;
+	props: PhotonRootProps;
+}
+
+export interface CreatePhotonAppOptions {
+	/** The id of the element the page is in. Default: `'app'`. */
+	id?: string;
+	resolve: ResolvePage;
+	/**
+	 * Mount `App` into `el`. Without it, `App` is hydrated when the server
+	 * rendered the page, and mounted otherwise.
+	 */
+	setup?(options: SetupOptions<HTMLElement>): void;
+}
+
+export interface CreatePhotonAppSsrOptions {
+	/** The page to render — what the SSR entry's `render(page)` receives. */
+	page: PhotonPageData;
+	resolve: ResolvePage;
+	/** `render(App, { props })` from `svelte/server`. */
+	setup(
+		options: SetupOptions<null>,
+	):
+		| { head?: string; body: string }
+		| Promise<{ head?: string; body: string }>;
+}
+
+/**
+ * Start a Photon app. In the browser (no `page`), read the page the server
+ * sent, mount `App`, and start the router. In the SSR entry (with `page`),
+ * render it through `setup` and return `{ head, body }` — what the entry's
+ * default export gives Photon.
+ */
+export declare function createPhotonApp(
+	options: CreatePhotonAppSsrOptions,
+): Promise<PhotonAppSsrResponse>;
+export declare function createPhotonApp(
+	options: CreatePhotonAppOptions,
+): Promise<void>;
 
 /** The page on screen; its fields follow every visit. */
 export declare function usePage(): PhotonPageData;

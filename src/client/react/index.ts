@@ -6,13 +6,11 @@
  * `@inertiajs/react` 3.7.1 (read from its source) onto Photon's router, with
  * the same props and the same behaviour.
  *
- * One structural difference. Inertia's `App` component provides the page to
- * every component, on the server and in the browser. Photon renders the page
- * component itself, so the page comes from two places: the router's store in
- * the browser (primed before hydration, so the first render matches the
- * server's), and `<PhotonPage page={pageData}>` around the page in the SSR
- * entry. An app that never calls `usePage` — directly or through these
- * components — needs neither.
+ * `createPhotonApp` and its `App` mount the app the way `createInertiaApp`
+ * does. The page comes from the router's store in the browser (primed before
+ * hydration, so the first render matches the server's); on the server, `App`
+ * provides it — or `<PhotonPage page={pageData}>` does, around a page an SSR
+ * entry renders by hand.
  *
  * Only a React app imports this module, so React's types enter no other app's
  * program.
@@ -29,6 +27,7 @@ import {
 	forwardRef,
 	type HTMLAttributes,
 	type MouseEvent,
+	type ReactElement,
 	type ReactNode,
 	type RefObject,
 	useCallback,
@@ -40,6 +39,16 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { isServerRendered } from "../adapters/types.js";
+import {
+	appPropsFor,
+	connectApp,
+	type PhotonAppProps,
+	type PhotonAppSsrResponse,
+	type ResolvePage,
+	startApp,
+} from "../app.js";
+import { PhotonClientError } from "../errors.js";
 import { createForm, type FormState, type FormStore } from "../form.js";
 import {
 	createFormController,
@@ -102,6 +111,108 @@ export function usePage(): PhotonPageData {
 		);
 	}
 	return page;
+}
+
+// ─── The app ─────────────────────────────────────────────────────────────
+
+/** A function or class component, or an exotic one (`memo`, `forwardRef`, `lazy`). */
+function isElementType(value: unknown): value is ElementType {
+	return (
+		typeof value === "function" ||
+		(typeof value === "object" && value !== null && "$$typeof" in value)
+	);
+}
+
+/**
+ * The root of a Photon app: it renders the page on screen, and the next one
+ * the router visits. Mount it in `createPhotonApp`'s `setup`.
+ */
+export function App({
+	initialPage,
+	initialComponent,
+}: PhotonAppProps): ReactNode {
+	const [current, setCurrent] = useState({
+		component: initialComponent,
+		props: initialPage.props,
+	});
+	useEffect(
+		() => connectApp((component, props) => setCurrent({ component, props })),
+		[],
+	);
+	if (!isElementType(current.component)) {
+		throw new PhotonClientError(
+			"E_PHOTON_UNKNOWN_PAGE",
+			"The page component resolve() gave is not a React component.",
+		);
+	}
+	const page = createElement(current.component, current.props);
+	// On the server nothing primed the router: the page comes from here.
+	return getCurrentPage() === undefined
+		? createElement(PhotonPage, { page: initialPage }, page)
+		: page;
+}
+
+export interface SetupOptions<El> {
+	/** The element the page is in; null on the server. */
+	el: El;
+	App: typeof App;
+	props: PhotonAppProps;
+}
+
+export interface CreatePhotonAppOptions {
+	/** The id of the element the page is in. Default: `'app'`. */
+	id?: string;
+	resolve: ResolvePage;
+	/**
+	 * Mount `App` into `el` — to wrap it in providers, or to choose between
+	 * hydrating and mounting. Without it, `App` is hydrated when the server
+	 * rendered the page, and mounted otherwise.
+	 */
+	setup?(options: SetupOptions<HTMLElement>): void;
+}
+
+export interface CreatePhotonAppSsrOptions {
+	/** The page to render — what the SSR entry's `render(page)` receives. */
+	page: PhotonPageData;
+	/** `renderToString` from `react-dom/server`. */
+	render(element: ReactElement): string;
+	resolve: ResolvePage;
+	/** The element to render; `<App {...props} />` without it. */
+	setup?(options: SetupOptions<null>): ReactElement;
+}
+
+/**
+ * Start a Photon app. In the browser (no `page`), read the page the server
+ * sent, mount `App`, and start the router. In the SSR entry (with `page` and
+ * `render`), render `App` for that page and return `{ head, body }` — what
+ * the entry's default export gives Photon.
+ */
+export function createPhotonApp(
+	options: CreatePhotonAppSsrOptions,
+): Promise<PhotonAppSsrResponse>;
+export function createPhotonApp(options: CreatePhotonAppOptions): Promise<void>;
+export async function createPhotonApp(
+	options: CreatePhotonAppOptions | CreatePhotonAppSsrOptions,
+): Promise<unknown> {
+	if ("page" in options) {
+		const props = await appPropsFor(options.resolve, options.page);
+		const element = options.setup
+			? options.setup({ el: null, App, props })
+			: createElement(App, props);
+		return { head: [], body: options.render(element) };
+	}
+	const { setup } = options;
+	await startApp({
+		id: options.id,
+		resolve: options.resolve,
+		mount: async (el, props) => {
+			if (setup) return setup({ el, App, props });
+			const client = await import("react-dom/client");
+			const element = createElement(App, props);
+			if (isServerRendered(el)) client.hydrateRoot(el, element);
+			else client.createRoot(el).render(element);
+		},
+	});
 }
 
 /** `get(props, path)` for a dotted prop name. */

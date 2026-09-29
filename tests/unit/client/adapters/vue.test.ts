@@ -35,6 +35,7 @@ const Other = defineComponent({
 /** `#app` holding what the server would have rendered for `props`. */
 async function serverRendered(props: Record<string, unknown>) {
 	const target = document.createElement("div");
+	target.setAttribute("data-server-rendered", "true");
 	target.innerHTML = await renderToString(createSSRApp(Counter, props));
 	document.body.replaceChildren(target);
 	return target;
@@ -62,6 +63,18 @@ describe("photon/client/adapters/vue", () => {
 		// Hydration adopts the node the server rendered instead of replacing it.
 		expect(button(target)).toBe(ssrButton);
 		expect(warn.mock.calls.flat().join(" ")).not.toMatch(/mismatch/i);
+	});
+
+	it("mounts an empty target, when the server rendered nothing, without a warning", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const target = document.createElement("div");
+		document.body.replaceChildren(target);
+
+		await vueAdapter.hydrate(target, Counter, { label: "a" });
+
+		expect(button(target).textContent).toBe("a:0");
+		// createSSRApp on an empty target warns that it mounts instead.
+		expect(warn).not.toHaveBeenCalled();
 	});
 
 	it("keeps the component's state when the same page gets new props", async () => {

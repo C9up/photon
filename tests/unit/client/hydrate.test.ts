@@ -20,14 +20,14 @@ function setupDom(opts: PageDataInit = {}, includeTarget = true): void {
 	if (opts.framework !== null) data.framework = opts.framework ?? "react";
 
 	document.documentElement.innerHTML = `
-    ${includeTarget ? '<div id="app">SSR</div>' : ""}
+    ${includeTarget ? '<div id="app" data-server-rendered="true">SSR</div>' : ""}
     <script type="application/json" id="photon-data">${JSON.stringify(data)}</script>
   `;
 }
 
 function setRawPhotonData(rawText: string): void {
 	document.documentElement.innerHTML = `
-    <div id="app">SSR</div>
+    <div id="app" data-server-rendered="true">SSR</div>
     <script type="application/json" id="photon-data">${rawText}</script>
   `;
 }
@@ -123,7 +123,8 @@ describe("photon/client > hydrate — happy path", () => {
 
 describe("photon/client > hydrate — error paths", () => {
 	it("throws E_PHOTON_HYDRATION_NO_DATA when the script block is absent", async () => {
-		document.documentElement.innerHTML = '<div id="app">SSR</div>';
+		document.documentElement.innerHTML =
+			'<div id="app" data-server-rendered="true">SSR</div>';
 		await expect(
 			hydrate({ resolveComponent: async () => ({ default: {} }) }),
 		).rejects.toMatchObject({

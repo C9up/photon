@@ -32,7 +32,7 @@ describe("photon/client > integration roundtrip", () => {
 			framework: "react",
 			entryClient: "resources/app.tsx",
 			ssr: { enabled: true, entrypoint: "resources/ssr.tsx" },
-		});
+		}).useSsrModule({ render: () => "<p>hi</p>" });
 		const initial = await renderer.render("Home", { greeting: "hi" }, "/start");
 		document.documentElement.innerHTML = initial.html;
 
@@ -110,7 +110,7 @@ describe("photon/client > integration roundtrip", () => {
 			framework: "react",
 			entryClient: "app.tsx",
 			ssr: { enabled: true, entrypoint: "ssr.tsx" },
-		});
+		}).useSsrModule({ render: () => "<p>page</p>" });
 		// The user's "props" intentionally contain an HTML-tag-like substring.
 		const dangerous = "<script>alert(1)</script>";
 		const initial = await renderer.render("Page", { html: dangerous }, "/");

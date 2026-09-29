@@ -87,6 +87,30 @@ describe("photon > dev SSR", () => {
 		).toContain("defaulted");
 	});
 
+	it("takes a default-exported render, and its { head, body }", async () => {
+		const { server } = fakeCompiler({
+			default: (page: PageProps) => ({
+				head: [`<title>${page.component}</title>`],
+				body: "<main>default</main>",
+			}),
+		});
+		const { html } = await (await renderer(server)).render("Home", {}, "/");
+		expect(html).toContain("<title>Home</title>");
+		expect(html).toContain("<main>default</main>");
+	});
+
+	it("rejects a render that returns neither a string nor { head, body }", async () => {
+		for (const output of [42, { body: 1 }, { head: "<title>", body: "" }]) {
+			const { server } = fakeCompiler({ default: () => output });
+			await expect(
+				(await renderer(server)).render("Home", {}, "/"),
+			).rejects.toMatchObject({
+				code: "E_PHOTON_SSR_RENDER_FAILED",
+				message: "SSR module returned neither a string nor { head, body }",
+			});
+		}
+	});
+
 	it("names the entry point when it exports no render()", async () => {
 		const { server } = fakeCompiler({ notRender: () => "" });
 		const photon = await renderer(server);

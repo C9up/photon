@@ -1,6 +1,12 @@
-// Photon's Svelte 5 components — `@c9up/photon/svelte`. The default export is
-// the root that `hydrate({ svelteRoot })` and the SSR entry render.
-export { default, default as PhotonRoot } from "./PhotonRoot.svelte";
+// Photon's Svelte 5 components — `@c9up/photon/svelte`. The default export,
+// also `App`, is the root that `createPhotonApp`, `hydrate({ svelteRoot })`
+// and the SSR entry render.
+export {
+	default,
+	default as App,
+	default as PhotonRoot,
+} from "./PhotonRoot.svelte";
+export { createPhotonApp } from "./createPhotonApp.js";
 export { default as Deferred } from "./Deferred.svelte";
 export { default as Form, useFormContext } from "./Form.svelte";
 export { default as InfiniteScroll } from "./InfiniteScroll.svelte";

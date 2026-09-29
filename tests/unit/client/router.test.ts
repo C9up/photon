@@ -76,7 +76,7 @@ async function bootHydratedReactPage(
 	}));
 
 	document.documentElement.innerHTML = `
-    <div id="app">SSR</div>
+    <div id="app" data-server-rendered="true">SSR</div>
     <script type="application/json" id="photon-data">${JSON.stringify({
 			component: "Home",
 			props: { x: 1 },

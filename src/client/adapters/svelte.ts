@@ -21,7 +21,11 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import type { PhotonAdapter, PhotonAdapterHandle } from "./types.js";
+import {
+	isServerRendered,
+	type PhotonAdapter,
+	type PhotonAdapterHandle,
+} from "./types.js";
 
 type SvelteInstance = unknown;
 
@@ -74,11 +78,13 @@ export const svelteAdapter: PhotonAdapter = {
 			);
 		}
 
+		// Server markup is taken over; an empty target, mounted.
+		const start = isServerRendered(target) ? svelte.hydrate : svelte.mount;
 		// With Photon's root the page lives in the root's state, and a change of
 		// props is an update of that state: the page component keeps its own.
 		const root = options.svelteRoot;
 		if (root !== undefined) {
-			let rootInstance: SvelteInstance | undefined = svelte.hydrate(root, {
+			let rootInstance: SvelteInstance | undefined = start(root, {
 				target,
 				props: { component: Component, props },
 			});
@@ -100,7 +106,7 @@ export const svelteAdapter: PhotonAdapter = {
 			};
 		}
 
-		let instance: SvelteInstance | undefined = svelte.hydrate(Component, {
+		let instance: SvelteInstance | undefined = start(Component, {
 			target: target as Element,
 			props,
 		});

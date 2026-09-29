@@ -11,7 +11,8 @@ function defined<T>(value: T | null | undefined): T {
 }
 
 beforeEach(() => {
-	document.documentElement.innerHTML = '<div id="app">SSR</div>';
+	document.documentElement.innerHTML =
+		'<div id="app" data-server-rendered="true">SSR</div>';
 });
 
 afterEach(() => {
@@ -40,6 +41,27 @@ describe("photon/client/adapters/react", () => {
 		expect(createElement).toHaveBeenCalledWith("PageComponent", { x: 1 });
 		expect(hydrateRoot).toHaveBeenCalledTimes(1);
 		expect(hydrateRoot.mock.calls[0]?.[0]).toBe(target);
+	});
+
+	it("mounts with createRoot when the server rendered nothing", async () => {
+		const render = vi.fn();
+		const createRoot = vi.fn(() => ({ render, unmount: vi.fn() }));
+		const hydrateRoot = vi.fn();
+		vi.doMock("react-dom/client", () => ({ createRoot, hydrateRoot }));
+		vi.doMock("react", () => ({
+			createElement: (type: unknown, props: unknown) => ({ type, props }),
+		}));
+		const { reactAdapter } = await import(
+			"../../../../src/client/adapters/react.js"
+		);
+		const target = defined(document.getElementById("app"));
+		target.removeAttribute("data-server-rendered");
+		await reactAdapter.hydrate(target, "Page", { x: 1 });
+
+		// Hydrating an empty target would be a mismatch React reports.
+		expect(hydrateRoot).not.toHaveBeenCalled();
+		expect(createRoot).toHaveBeenCalledWith(target);
+		expect(render).toHaveBeenCalledWith({ type: "Page", props: { x: 1 } });
 	});
 
 	it("update re-renders the root with the new component", async () => {

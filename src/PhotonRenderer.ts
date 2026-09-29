@@ -182,9 +182,15 @@ interface ViteManifestEntry {
 /**
  * Photon Renderer — handles SSR and page data serialization.
  */
+/**
+ * What a server render gives back: the page's markup, alone or with tags for
+ * `<head>`. Photon writes the `<div id="app">` around the body itself.
+ */
+export type SsrOutput = string | { head?: string[]; body: string };
+
 /** What a server-rendering entry point has to provide. */
 export interface SsrModule {
-	render(page: PageProps): Promise<string> | string;
+	render(page: PageProps): Promise<SsrOutput> | SsrOutput;
 }
 
 export class PhotonRenderer {
@@ -297,7 +303,7 @@ export class PhotonRenderer {
 		}
 		const server = this.#devServer;
 		this.#ssrModule = {
-			render: async (page: PageProps): Promise<string> => {
+			render: async (page: PageProps): Promise<SsrOutput> => {
 				const loaded = await server.ssrLoadModule(
 					`/${this.#ssrEntrypoint().replace(/^\/+/, "")}`,
 				);
@@ -306,7 +312,9 @@ export class PhotonRenderer {
 					throw new PhotonError(
 						"E_PHOTON_SSR_LOAD_FAILED",
 						`${this.#ssrEntrypoint()} does not export a render() function`,
-						{ hint: "Export `render(page)` from the SSR entry point." },
+						{
+							hint: "Export `render(page)` from the SSR entry point, as its default export.",
+						},
 					);
 				}
 				return render(page);
@@ -572,10 +580,11 @@ export class PhotonRenderer {
 		// (detected by X-Photon request header, set by the client-side router)
 
 		// SSR mode: render full HTML
-		let ssrHtml = "";
+		let ssr: { head: string[]; body: string } | undefined;
 		if (this.#ssrModule && (await this.ssrEnabled(component, requestContext))) {
+			let output: unknown;
 			try {
-				ssrHtml = await this.#ssrModule.render(pageData);
+				output = await this.#ssrModule.render(pageData);
 			} catch (err) {
 				// Photon's own failure (the entry cannot be loaded) keeps its code.
 				if (err instanceof PhotonError) throw err;
@@ -589,11 +598,11 @@ export class PhotonRenderer {
 					},
 				);
 			}
-			// Validate SSR output
-			if (typeof ssrHtml !== "string") {
+			ssr = readSsrOutput(output);
+			if (ssr === undefined) {
 				throw new PhotonError(
 					"E_PHOTON_SSR_RENDER_FAILED",
-					"SSR module returned non-string output",
+					"SSR module returned neither a string nor { head, body }",
 				);
 			}
 		}
@@ -609,10 +618,10 @@ export class PhotonRenderer {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  ${headTags ? `${headTags}\n  ` : ""}${assets.css.map((href) => `<link rel="stylesheet" href="${escapeAttr(href)}">`).join("\n  ")}
+  ${headTags ? `${headTags}\n  ` : ""}${ssr && ssr.head.length > 0 ? `${ssr.head.join("\n  ")}\n  ` : ""}${assets.css.map((href) => `<link rel="stylesheet" href="${escapeAttr(href)}">`).join("\n  ")}
 </head>
 <body>
-  <div id="app">${ssrHtml}</div>
+  <div id="app"${ssr ? ' data-server-rendered="true"' : ""}>${ssr?.body ?? ""}</div>
   <script type="application/json" id="photon-data">${escapeScriptJson(pageDataJson)}</script>
   ${assets.js.map((src) => `<script type="module" src="${escapeAttr(src)}"></script>`).join("\n  ")}
 </body>
@@ -882,7 +891,7 @@ function isManifest(
 async function loadSsrModule(
 	absSsrBuildDir: string,
 	entrypoint: string,
-): Promise<{ render: (page: PageProps) => Promise<string> | string }> {
+): Promise<SsrModule> {
 	const parsed = path.parse(entrypoint);
 	const candidates = [
 		path.join(absSsrBuildDir, "ssr.js"),
@@ -895,10 +904,11 @@ async function loadSsrModule(
 		if (seen.has(candidate)) continue;
 		seen.add(candidate);
 		try {
-			const mod = await import(pathToFileURL(candidate).href);
-			if (mod && typeof mod.render === "function") {
-				return mod as { render: (page: PageProps) => Promise<string> | string };
-			}
+			const mod: Record<string, unknown> = await import(
+				pathToFileURL(candidate).href
+			);
+			const render = pickRender(mod);
+			if (render !== undefined) return { render };
 		} catch (err) {
 			// A genuine "file not found" just means try the next candidate. Any
 			// other failure means the bundle exists but threw at import time
@@ -1031,10 +1041,33 @@ function isViteLike(value: unknown): value is ViteLike {
 	);
 }
 
-/** The `render` export, wherever the entry point put it. */
+/** The server render and the head tags it gave, or undefined for anything else. */
+function readSsrOutput(
+	output: unknown,
+): { head: string[]; body: string } | undefined {
+	if (typeof output === "string") return { head: [], body: output };
+	if (typeof output !== "object" || output === null) return undefined;
+	const body: unknown = Reflect.get(output, "body");
+	const head: unknown = Reflect.get(output, "head");
+	if (typeof body !== "string") return undefined;
+	if (head === undefined) return { head: [], body };
+	if (Array.isArray(head) && head.every((tag) => typeof tag === "string")) {
+		return { head, body };
+	}
+	return undefined;
+}
+
+/**
+ * The render function, wherever the entry point put it: the default export,
+ * a named `render`, or a `render` on a default object.
+ */
 function pickRender(
 	loaded: Record<string, unknown>,
-): ((page: PageProps) => Promise<string> | string) | undefined {
+): ((page: PageProps) => Promise<SsrOutput> | SsrOutput) | undefined {
+	if (typeof loaded.default === "function") {
+		const render = loaded.default;
+		return (page) => render(page);
+	}
 	if (typeof loaded.render === "function") {
 		const render = loaded.render;
 		return (page) => render(page);

@@ -1,6 +1,7 @@
 /**
  * Vue 3 adapter — uses `createSSRApp` (NOT `createApp`) to take over the
- * SSR-rendered DOM via hydration.
+ * SSR-rendered DOM via hydration, and `createApp` when the server rendered
+ * nothing.
  *
  * The app's root is not the page but a render function that draws whichever
  * page a `shallowRef` holds. Navigation replaces the ref: a new page component
@@ -17,7 +18,11 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import type { PhotonAdapter, PhotonAdapterHandle } from "./types.js";
+import {
+	isServerRendered,
+	type PhotonAdapter,
+	type PhotonAdapterHandle,
+} from "./types.js";
 
 interface VueApp {
 	mount(target: Element | string): unknown;
@@ -26,6 +31,7 @@ interface VueApp {
 
 interface VueModule {
 	createSSRApp(rootComponent: { render: () => unknown }): VueApp;
+	createApp(rootComponent: { render: () => unknown }): VueApp;
 	h(type: unknown, props?: Record<string, unknown> | null): unknown;
 	shallowRef<T>(value: T): { value: T };
 }
@@ -40,7 +46,8 @@ export const vueAdapter: PhotonAdapter = {
 		// Literal import so the consumer's Vite bundles the Vue runtime.
 		const vue: VueModule = await import("vue");
 		const page = vue.shallowRef<Page>({ component: Component, props });
-		let app: VueApp | undefined = vue.createSSRApp({
+		const create = isServerRendered(target) ? vue.createSSRApp : vue.createApp;
+		let app: VueApp | undefined = create({
 			render: () => vue.h(page.value.component, page.value.props),
 		});
 		app.mount(target);

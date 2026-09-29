@@ -22,6 +22,15 @@ export interface PhotonAdapterHandle {
 	unmount(): void;
 }
 
+/**
+ * Whether the server rendered the page into `target` — what PhotonRenderer
+ * marks with `data-server-rendered`. Only such markup is hydrated; an empty
+ * target is mounted, which is what a page gets when SSR is off.
+ */
+export function isServerRendered(target: Element): boolean {
+	return target.hasAttribute("data-server-rendered");
+}
+
 export interface PhotonAdapter {
 	/**
 	 * Async because each adapter dynamically imports its framework runtime

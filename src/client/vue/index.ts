@@ -7,14 +7,18 @@
  * props, same slots (`fallback`, `rescue`, `previous`, `next`, `loading`),
  * same behaviour.
  *
- * The page comes from the router's store in the browser and, on the server,
- * from `<PhotonPage :page="pageData">` around the page in the SSR entry —
- * Inertia's `App` provides it on both sides; Photon renders the page component
- * itself. Only a Vue app imports this module.
+ * `createPhotonApp`, its `App` and `plugin` mount the app the way
+ * `createInertiaApp` does. The page comes from the router's store in the
+ * browser; on the server, `App` provides it — or `<PhotonPage :page="pageData">`
+ * does, around a page an SSR entry renders by hand. Only a Vue app imports
+ * this module.
  */
 
 import {
+	type Component,
 	computed,
+	createApp,
+	createSSRApp,
 	defineComponent,
 	Fragment,
 	getCurrentScope,
@@ -31,8 +35,19 @@ import {
 	type ShallowRef,
 	shallowRef,
 	type VNodeChild,
+	type App as VueApp,
 	watch,
 } from "vue";
+import { isServerRendered } from "../adapters/types.js";
+import {
+	appPropsFor,
+	connectApp,
+	type PhotonAppProps,
+	type PhotonAppSsrResponse,
+	type ResolvePage,
+	startApp,
+} from "../app.js";
+import { PhotonClientError } from "../errors.js";
 import { createForm, type FormErrors, type FormStore } from "../form.js";
 import {
 	createFormController,
@@ -114,6 +129,136 @@ export function usePage() {
 		scrollProps: computed(() => page.value?.scrollProps),
 		rememberedState: computed(() => page.value?.rememberedState),
 		flash: computed(() => page.value?.flash),
+	});
+}
+
+// ─── The app ─────────────────────────────────────────────────────────────
+
+/** A component object (an SFC) or a functional component. */
+function isComponent(value: unknown): value is Component {
+	return (
+		typeof value === "function" || (typeof value === "object" && value !== null)
+	);
+}
+
+/**
+ * The root of a Photon app: it renders the page on screen, and the next one
+ * the router visits. Mount it in `createPhotonApp`'s `setup`.
+ */
+export const App = defineComponent(
+	(props: PhotonAppProps) => {
+		const current = shallowRef({
+			component: props.initialComponent,
+			props: props.initialPage.props,
+		});
+		let disconnect: (() => void) | undefined;
+		onMounted(() => {
+			disconnect = connectApp((component, next) => {
+				current.value = { component, props: next };
+			});
+		});
+		onUnmounted(() => disconnect?.());
+		// On the server nothing primed the router: the page comes from here.
+		if (getCurrentPage() === undefined) provide(PAGE_KEY, props.initialPage);
+		return () => {
+			const { component, props: pageProps } = current.value;
+			if (!isComponent(component)) {
+				throw new PhotonClientError(
+					"E_PHOTON_UNKNOWN_PAGE",
+					"The page component resolve() gave is not a Vue component.",
+				);
+			}
+			return h(component, pageProps);
+		};
+	},
+	{ name: "PhotonApp", props: ["initialPage", "initialComponent"] },
+);
+
+/**
+ * Install on the app `setup` creates: `$photon` (the router) and `$page` (the
+ * page on screen, in the browser) for templates and the Options API.
+ */
+export const plugin = {
+	install(app: VueApp): void {
+		Object.defineProperty(app.config.globalProperties, "$photon", {
+			get: () => router,
+		});
+		Object.defineProperty(app.config.globalProperties, "$page", {
+			get: () => getCurrentPage(),
+		});
+	},
+};
+
+declare module "vue" {
+	interface ComponentCustomProperties {
+		/** The router, installed by Photon's `plugin`. */
+		$photon: typeof router;
+		/** The page on screen in the browser, installed by Photon's `plugin`. */
+		$page: PhotonPageData | undefined;
+	}
+}
+
+export interface SetupOptions<El> {
+	/** The element the page is in; null on the server. */
+	el: El;
+	App: typeof App;
+	props: PhotonAppProps;
+	plugin: typeof plugin;
+}
+
+export interface CreatePhotonAppOptions {
+	/** The id of the element the page is in. Default: `'app'`. */
+	id?: string;
+	resolve: ResolvePage;
+	/**
+	 * Create the Vue app around `App` and mount it into `el`. Without it,
+	 * `createSSRApp` hydrates what the server rendered, `createApp` mounts
+	 * otherwise, and `plugin` is installed either way.
+	 */
+	setup?(options: SetupOptions<HTMLElement>): void;
+}
+
+export interface CreatePhotonAppSsrOptions {
+	/** The page to render — what the SSR entry's `render(page)` receives. */
+	page: PhotonPageData;
+	/** `renderToString` from `vue/server-renderer`. */
+	render(app: VueApp): Promise<string>;
+	resolve: ResolvePage;
+	/** The app to render, created with `createSSRApp`. */
+	setup?(options: SetupOptions<null>): VueApp;
+}
+
+/**
+ * Start a Photon app. In the browser (no `page`), read the page the server
+ * sent, mount `App`, and start the router. In the SSR entry (with `page` and
+ * `render`), render `App` for that page and return `{ head, body }` — what
+ * the entry's default export gives Photon.
+ */
+export function createPhotonApp(
+	options: CreatePhotonAppSsrOptions,
+): Promise<PhotonAppSsrResponse>;
+export function createPhotonApp(options: CreatePhotonAppOptions): Promise<void>;
+export async function createPhotonApp(
+	options: CreatePhotonAppOptions | CreatePhotonAppSsrOptions,
+): Promise<unknown> {
+	if ("page" in options) {
+		const props = await appPropsFor(options.resolve, options.page);
+		const app = options.setup
+			? options.setup({ el: null, App, props, plugin })
+			: createSSRApp({ render: () => h(App, props) }).use(plugin);
+		return { head: [], body: await options.render(app) };
+	}
+	const { setup } = options;
+	await startApp({
+		id: options.id,
+		resolve: options.resolve,
+		mount: (el, props) => {
+			if (setup) return setup({ el, App, props, plugin });
+			const create = isServerRendered(el) ? createSSRApp : createApp;
+			create({ render: () => h(App, props) })
+				.use(plugin)
+				.mount(el);
+		},
 	});
 }
 

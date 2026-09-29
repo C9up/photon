@@ -30,6 +30,7 @@ async function renderSvelte(
 
 async function serverRendered(props: Record<string, unknown>) {
 	const target = document.createElement("div");
+	target.setAttribute("data-server-rendered", "true");
 	target.innerHTML = await renderSvelte("Counter", props);
 	document.body.replaceChildren(target);
 	return target;
@@ -64,6 +65,8 @@ describe("photon/client > Svelte root in Chromium", () => {
 		);
 
 		expect(button(target)).toBe(ssrButton);
+		// Taken over, not mounted beside it.
+		expect(target.querySelectorAll("button")).toHaveLength(1);
 		expect(warn.mock.calls.flat().join(" ")).not.toMatch(/hydrat|mismatch/i);
 	});
 

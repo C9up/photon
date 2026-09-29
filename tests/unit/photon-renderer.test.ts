@@ -7,6 +7,7 @@ import {
 	type PageProps,
 	type PhotonConfig,
 	PhotonRenderer,
+	type SsrOutput,
 } from "../../src/PhotonRenderer.js";
 
 const baseConfig: PhotonConfig = {
@@ -137,7 +138,7 @@ describe("photon > PhotonRenderer > render() with an SSR module", () => {
 
 	function attachSsrModule(
 		r: PhotonRenderer,
-		render: (page: PageProps) => string | Promise<string>,
+		render: (page: PageProps) => SsrOutput | Promise<SsrOutput>,
 	) {
 		// Through the public seam, not a cast: the field is a real private now,
 		// so the previous `as unknown as { ssrModule }` override could not reach
@@ -151,7 +152,24 @@ describe("photon > PhotonRenderer > render() with an SSR module", () => {
 		const r = new PhotonRenderer(baseConfig);
 		attachSsrModule(r, () => "<h1>hello</h1>");
 		const result = await r.render("Home", {}, "/");
-		expect(result.html).toContain('<div id="app"><h1>hello</h1></div>');
+		// Marked, so the client hydrates this markup instead of mounting anew.
+		expect(result.html).toContain(
+			'<div id="app" data-server-rendered="true"><h1>hello</h1></div>',
+		);
+	});
+
+	it("puts the head tags of a { head, body } render into <head>", async () => {
+		const r = new PhotonRenderer(baseConfig);
+		attachSsrModule(r, () => ({
+			head: ['<meta name="x-rendered" content="1">'],
+			body: "<h1>hello</h1>",
+		}));
+		const { html } = await r.render("Home", {}, "/");
+		const head = html.slice(0, html.indexOf("</head>"));
+		expect(head).toContain('<meta name="x-rendered" content="1">');
+		expect(html).toContain(
+			'<div id="app" data-server-rendered="true"><h1>hello</h1></div>',
+		);
 	});
 
 	it("wraps a thrown render() error into a generic SSR_RENDER_FAILED PhotonError", async () => {
@@ -159,12 +177,6 @@ describe("photon > PhotonRenderer > render() with an SSR module", () => {
 		attachSsrModule(r, () => {
 			throw new Error("boom");
 		});
-		await expect(r.render("Home", {}, "/")).rejects.toBeInstanceOf(PhotonError);
-	});
-
-	it("rejects non-string SSR output as SSR_RENDER_FAILED", async () => {
-		const r = new PhotonRenderer(baseConfig);
-		attachSsrModule(r, () => 42 as unknown as string);
 		await expect(r.render("Home", {}, "/")).rejects.toBeInstanceOf(PhotonError);
 	});
 });
