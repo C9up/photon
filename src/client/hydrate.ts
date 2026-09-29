@@ -121,6 +121,23 @@ export interface HydrateOptions {
 	svelteRoot?: unknown;
 }
 
+/**
+ * Route name → its params, for `Link`, `Form` and `router.visit({ route })`.
+ * Empty until the application augments it — then only those names, with those
+ * params, type-check:
+ *
+ * ```ts
+ * declare module '@c9up/photon/client' {
+ *   interface PhotonRoutes extends RouteParams {} // from router.generateTypes()
+ * }
+ * ```
+ *
+ * Declared here, in the client entry, because an augmentation reaches only the
+ * module that declares the interface.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: the application augments it (declaration merging); a type alias cannot be augmented.
+export interface PhotonRoutes {}
+
 export type { PhotonClientErrorCode } from "./errors.js";
 /** Re-export so consumers can `instanceof`-check without a second import. */
 export { PhotonClientError } from "./errors.js";
@@ -144,6 +161,16 @@ export type {
 	VisitOptions,
 } from "./router.js";
 export { router } from "./router.js";
+export {
+	getRoute,
+	type RouteManifest,
+	type RouteName,
+	type RouteParamsFor,
+	type RouteTarget,
+	resolvePageComponent,
+	setRoutes,
+	urlFor,
+} from "./routes.js";
 
 /**
  * Tracks targets that have already been hydrated so a second `hydrate()` call

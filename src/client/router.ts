@@ -31,6 +31,7 @@ import {
 	type OncePropMeta,
 	restoreOnceProps,
 } from "./mergeProps.js";
+import { type RouteTarget, resolveTarget } from "./routes.js";
 
 export type ResolveComponent = (name: string) => Promise<{ default: unknown }>;
 
@@ -926,6 +927,11 @@ export interface Visit {
 	preserveState: boolean;
 }
 
+/** A verb's target as a URL: the verb itself decides the method. */
+function urlOf(target: string | RouteTarget): string {
+	return typeof target === "string" ? target : resolveTarget(target).url;
+}
+
 /** The router events a page can listen to, with what their `detail` carries. */
 export interface RouterEvents {
 	error: { errors: Record<string, unknown> };
@@ -1110,7 +1116,25 @@ export interface VisitOptions extends PartialRequest {
  * works unchanged.
  */
 export const router = {
-	async visit(url: string, visitOptions: VisitOptions = {}): Promise<void> {
+	/**
+	 * Visit a URL, a named route (`{ route, routeParams, qs }`, as
+	 * `@adonisjs/inertia`'s `useRouter().visit` takes it — the route's own
+	 * method unless `method` is given) or `{ href }`.
+	 */
+	async visit(
+		target: string | RouteTarget,
+		options: VisitOptions = {},
+	): Promise<void> {
+		if (typeof target !== "string") {
+			const resolved = resolveTarget(target);
+			const method = resolved.method ?? options.method;
+			return router.visit(resolved.url, {
+				...options,
+				...(method !== undefined ? { method } : {}),
+			});
+		}
+		const url = target;
+		const visitOptions = options;
 		const resolved = resolveUrl(url);
 		if (
 			activeOptions === undefined ||
@@ -1159,12 +1183,22 @@ export const router = {
 	},
 
 	/** `visit(url, { method: "get", data })`. */
-	get(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+	get(
+		target: string | RouteTarget,
+		data: RequestPayload = {},
+		options: VisitOptions = {},
+	) {
+		const url = urlOf(target);
 		return router.visit(url, { ...options, method: "get", data });
 	},
 
 	/** A POST visit; state is kept on the page, as Inertia's `router.post`. */
-	post(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+	post(
+		target: string | RouteTarget,
+		data: RequestPayload = {},
+		options: VisitOptions = {},
+	) {
+		const url = urlOf(target);
 		return router.visit(url, {
 			preserveState: true,
 			...options,
@@ -1173,7 +1207,12 @@ export const router = {
 		});
 	},
 
-	put(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+	put(
+		target: string | RouteTarget,
+		data: RequestPayload = {},
+		options: VisitOptions = {},
+	) {
+		const url = urlOf(target);
 		return router.visit(url, {
 			preserveState: true,
 			...options,
@@ -1182,7 +1221,12 @@ export const router = {
 		});
 	},
 
-	patch(url: string, data: RequestPayload = {}, options: VisitOptions = {}) {
+	patch(
+		target: string | RouteTarget,
+		data: RequestPayload = {},
+		options: VisitOptions = {},
+	) {
+		const url = urlOf(target);
 		return router.visit(url, {
 			preserveState: true,
 			...options,
@@ -1191,7 +1235,8 @@ export const router = {
 		});
 	},
 
-	delete(url: string, options: VisitOptions = {}) {
+	delete(target: string | RouteTarget, options: VisitOptions = {}) {
+		const url = urlOf(target);
 		return router.visit(url, {
 			preserveState: true,
 			...options,

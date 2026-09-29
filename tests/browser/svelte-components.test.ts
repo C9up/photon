@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { commands } from "vitest/browser";
 import type { PhotonPageData } from "../../src/client/hydrate.js";
 import { bootRouter, router } from "../../src/client/router.js";
+import { setRoutes } from "../../src/client/routes.js";
 import PhotonRoot from "../../src/client/svelte/PhotonRoot.svelte";
 import DeferredPage from "./fixtures/DeferredPage.svelte";
 import FormPage from "./fixtures/FormPage.svelte";
@@ -212,6 +213,7 @@ describe("photon/svelte > Link in Chromium", () => {
 			jsonPage({ url, props: {} }),
 		);
 		vi.stubGlobal("fetch", fetchMock);
+		setRoutes({ "users.show": { path: "/users/:id", methods: ["GET"] } });
 		const target = mountPage(LinkPage, {
 			component: "Page",
 			framework: "svelte",
@@ -220,6 +222,9 @@ describe("photon/svelte > Link in Chromium", () => {
 		});
 		const anchor = target.querySelector("a");
 		expect(anchor?.getAttribute("href")).toBe("/search?q=tea");
+		expect(target.querySelectorAll("a")[1]?.getAttribute("href")).toBe(
+			"/users/3",
+		);
 		const button = target.querySelector("button");
 		expect(button?.getAttribute("type")).toBe("button");
 

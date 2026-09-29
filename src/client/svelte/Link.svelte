@@ -12,9 +12,14 @@ import {
 	type VisitOptions,
 	withQuery,
 } from "../router.js";
+import { type RouteName, resolveRouteProps } from "../routes.js";
 
 interface Props {
-	href: string;
+	/** A URL — or name a route with `route` (and `routeParams`, `qs`), as in Adonis. */
+	href?: string;
+	route?: RouteName;
+	routeParams?: Record<string, string | number>;
+	qs?: Record<string, string | number | boolean>;
 	as?: keyof HTMLElementTagNameMap;
 	method?: Method;
 	data?: RequestPayload;
@@ -36,8 +41,11 @@ interface Props {
 
 let {
 	href,
+	route,
+	routeParams,
+	qs,
 	as = "a",
-	method = "get",
+	method: explicitMethod,
 	data = {},
 	replace = false,
 	preserveState,
@@ -56,8 +64,14 @@ let {
 }: Props = $props();
 
 let inFlight = $state(0);
+const routeTarget = $derived(
+	resolveRouteProps({ href, route, routeParams, qs, method: explicitMethod }),
+);
+const method = $derived(routeTarget.method);
 const element = $derived(as === "a" && method !== "get" ? "button" : as);
-const url = $derived(method === "get" ? withQuery(href, data) : href);
+const url = $derived(
+	method === "get" ? withQuery(routeTarget.url, data) : routeTarget.url,
+);
 
 function intercepts(event: MouseEvent): boolean {
 	const target = event.currentTarget;

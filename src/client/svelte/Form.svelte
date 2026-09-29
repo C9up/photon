@@ -25,6 +25,7 @@ export function useFormContext(): FormSlotProps | undefined {
 	import {
 		createFormController,
 		type FormComponentOptions,
+		formTarget,
 	} from "../formElement.js";
 
 	interface Props extends FormComponentOptions {
@@ -34,8 +35,11 @@ export function useFormContext(): FormSlotProps | undefined {
 	}
 
 	let {
-		action = "",
-		method = "get",
+		action,
+		method,
+		route,
+		routeParams,
+		qs,
 		headers,
 		errorBag,
 		transform,
@@ -57,9 +61,12 @@ export function useFormContext(): FormSlotProps | undefined {
 		...rest
 	}: Props = $props();
 
-	const controller = createFormController(() => ({
+	const currentProps = (): FormComponentOptions => ({
 		action,
 		method,
+		route,
+		routeParams,
+		qs,
 		headers,
 		errorBag,
 		transform,
@@ -76,7 +83,9 @@ export function useFormContext(): FormSlotProps | undefined {
 		resetOnError,
 		setDefaultsOnSuccess,
 		cancelOnUnmount,
-	}));
+	});
+	const controller = createFormController(currentProps);
+	const submitTarget = $derived(formTarget(currentProps()));
 	let exposed: FormSlotProps = $state(controller.getSnapshot());
 	const off = controller.subscribe(() => {
 		exposed = controller.getSnapshot();
@@ -123,8 +132,8 @@ export function useFormContext(): FormSlotProps | undefined {
 <form
 	{...rest}
 	bind:this={element}
-	{action}
-	{method}
+	action={submitTarget.url}
+	method={submitTarget.method}
 	inert={disableWhileProcessing && exposed.processing}
 	{onsubmit}
 >

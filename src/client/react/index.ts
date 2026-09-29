@@ -45,6 +45,7 @@ import {
 	createFormController,
 	type FormComponentOptions,
 	type FormSlotProps,
+	formTarget,
 } from "../formElement.js";
 import type { PhotonPageData } from "../hydrate.js";
 import {
@@ -66,6 +67,7 @@ import {
 	type VisitOptions,
 	withQuery,
 } from "../router.js";
+import { type RouteName, resolveRouteProps } from "../routes.js";
 
 // ─── The page ────────────────────────────────────────────────────────────
 
@@ -652,9 +654,14 @@ export function shouldIntercept(event: {
 
 export interface LinkProps
 	extends Omit<HTMLAttributes<HTMLElement>, "onClick" | "onError"> {
-	href: string;
+	/** A URL — or name a route with `route` (and `routeParams`, `qs`), as in Adonis. */
+	href?: string;
+	route?: RouteName;
+	routeParams?: Record<string, string | number>;
+	qs?: Record<string, string | number | boolean>;
 	/** The element rendered. Default `a` — a `button` for any other method than GET. */
 	as?: ElementType;
+	/** Default GET — or the route's first method with `route`. */
 	method?: Method;
 	data?: RequestPayload;
 	replace?: boolean;
@@ -679,7 +686,10 @@ function LinkComponent(
 		as = "a",
 		data = {},
 		href,
-		method = "get",
+		route,
+		routeParams,
+		qs,
+		method,
 		preserveState,
 		preserveUrl = false,
 		replace = false,
@@ -698,14 +708,15 @@ function LinkComponent(
 	ref: ForwardedRef<HTMLElement>,
 ): ReactNode {
 	const [inFlight, setInFlight] = useState(0);
-	const verb: Method = method;
+	const target = resolveRouteProps({ href, route, routeParams, qs, method });
+	const verb: Method = target.method;
 	// A link that changes something is a button, as upstream renders it: an
 	// anchor would be followed by crawlers and opened in new tabs as a GET.
 	const element =
 		typeof as === "string" && as.toLowerCase() === "a" && verb !== "get"
 			? "button"
 			: as;
-	const url = verb === "get" ? withQuery(href, data) : href;
+	const url = verb === "get" ? withQuery(target.url, data) : target.url;
 
 	const visit = (): void => {
 		void router.visit(url, {
@@ -843,8 +854,11 @@ function FormComponent(
 	{
 		children,
 		disableWhileProcessing = false,
-		action = "",
-		method = "get",
+		action,
+		method,
+		route,
+		routeParams,
+		qs,
 		headers,
 		errorBag,
 		transform,
@@ -869,6 +883,9 @@ function FormComponent(
 	latest.current = {
 		action,
 		method,
+		route,
+		routeParams,
+		qs,
 		headers,
 		errorBag,
 		transform,
@@ -889,6 +906,7 @@ function FormComponent(
 	const [controller] = useState(() =>
 		createFormController(() => latest.current),
 	);
+	const submitTarget = formTarget(latest.current);
 	const exposed = useSyncExternalStore(
 		controller.subscribe,
 		controller.getSnapshot,
@@ -908,8 +926,8 @@ function FormComponent(
 			{
 				...props,
 				ref: element,
-				action,
-				method,
+				action: submitTarget.url,
+				method: submitTarget.method,
 				onSubmit: (event: FormEvent<HTMLFormElement>) => {
 					event.preventDefault();
 					const native = event.nativeEvent;

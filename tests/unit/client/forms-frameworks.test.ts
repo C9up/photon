@@ -24,6 +24,7 @@ import {
 	useForm as useReactForm,
 } from "../../../src/client/react/index.js";
 import { bootRouter } from "../../../src/client/router.js";
+import { setRoutes } from "../../../src/client/routes.js";
 import {
 	useForm as createVueForm,
 	Form as VueForm,
@@ -173,6 +174,31 @@ describe("photon/react > Form", () => {
 			"no error",
 		);
 		expect(fetchMock.mock.calls[1]?.[1]?.body).toBe('{"email":"a@b.c"}');
+	});
+});
+
+describe("photon/react > Form on a named route", () => {
+	it("submits to the route's URL with the route's method", async () => {
+		setRoutes({ "users.update": { path: "/users/:id", methods: ["PUT"] } });
+		const props: FormProps = {
+			route: "users.update",
+			routeParams: { id: 5 },
+			children: () =>
+				createElement(
+					"div",
+					null,
+					createElement("input", { name: "email", defaultValue: "a@b.c" }),
+					createElement("button", { type: "submit" }, "save"),
+				),
+		};
+		const target = renderReact(createElement(ReactForm, props));
+		const form = target.querySelector("form");
+		expect(form?.getAttribute("action")).toBe("/users/5");
+		expect(form?.getAttribute("method")).toBe("put");
+		await act(async () => target.querySelector("button")?.click());
+		await until(() => fetchMock.mock.calls.length === 1, "the submission");
+		expect(fetchMock.mock.calls[0]?.[0]).toBe("/users/5");
+		expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT");
 	});
 });
 

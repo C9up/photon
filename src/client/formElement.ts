@@ -20,6 +20,7 @@ import {
 	type VisitOptions,
 	withQuery,
 } from "./router.js";
+import { type RouteName, resolveRouteProps } from "./routes.js";
 
 // ─── FormData → object (`formDataToObject`) ─────────────────────────────
 
@@ -245,6 +246,27 @@ export function resetFormFields(
 
 // ─── The controller ─────────────────────────────────────────────────────
 
+/**
+ * Where a `<Form>` submits: its named route, its `action` as `{ url, method }`,
+ * or its `action` URL with `method` (default GET).
+ */
+export function formTarget(props: FormComponentOptions): {
+	url: string;
+	method: Method;
+} {
+	const action = props.action;
+	if (props.route === undefined && typeof action === "object") {
+		return { url: action.url, method: props.method ?? action.method };
+	}
+	return resolveRouteProps({
+		href: typeof action === "string" ? action : undefined,
+		route: props.route,
+		routeParams: props.routeParams,
+		qs: props.qs,
+		method: props.method,
+	});
+}
+
 /** `value` with every file replaced by what identifies it, for comparing. */
 function comparable(value: unknown): unknown {
 	if (value instanceof File) {
@@ -261,10 +283,14 @@ function comparable(value: unknown): unknown {
 
 /** What `<Form>` is given beside its element. */
 export interface FormComponentOptions extends VisitOptions {
-	/** The URL to submit to. */
-	action?: string;
-	/** Default `get`. */
+	/** The URL to submit to, or `{ url, method }` as Adonis's `Form` takes it. */
+	action?: string | { url: string; method: Method };
+	/** Default `get` — or the route's first method with `route`. */
 	method?: Method;
+	/** A named route instead of `action` — `@adonisjs/inertia`'s `Form` props. */
+	route?: RouteName;
+	routeParams?: Record<string, string | number>;
+	qs?: Record<string, string | number | boolean>;
 	/** What the collected data becomes before it is sent. */
 	transform?: (data: Tree) => RequestPayload;
 	/** Extra visit options, merged last. */
@@ -344,8 +370,7 @@ export function createFormController(
 
 	const submit = (submitter?: HTMLElement | null): void => {
 		const props = read();
-		const method = props.method ?? "get";
-		const action = props.action ?? "";
+		const { url: action, method } = formTarget(props);
 		const collected = getData(submitter);
 		const url = method === "get" ? withQuery(action, collected) : action;
 		const data = method === "get" ? {} : collected;

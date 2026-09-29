@@ -38,6 +38,7 @@ import {
 	createFormController,
 	type FormComponentOptions,
 	type FormSlotProps,
+	formTarget,
 } from "../formElement.js";
 import type { PhotonPageData } from "../hydrate.js";
 import {
@@ -56,6 +57,7 @@ import {
 	type VisitOptions,
 	withQuery,
 } from "../router.js";
+import { type RouteName, resolveRouteProps } from "../routes.js";
 
 // ─── The page ────────────────────────────────────────────────────────────
 
@@ -535,9 +537,14 @@ export const InfiniteScroll = defineComponent(
 // ─── Link ────────────────────────────────────────────────────────────────
 
 export interface LinkProps {
-	href: string;
+	/** A URL — or name a route with `route` (and `routeParams`, `qs`), as in Adonis. */
+	href?: string;
+	route?: RouteName;
+	routeParams?: Record<string, string | number>;
+	qs?: Record<string, string | number | boolean>;
 	/** The element rendered. Default `a` — a `button` for any other method than GET. */
 	as?: string;
+	/** Default GET — or the route's first method with `route`. */
 	method?: Method;
 	data?: RequestPayload;
 	replace?: boolean;
@@ -579,13 +586,16 @@ function shouldIntercept(event: MouseEvent): boolean {
 export const Link = defineComponent(
 	(props: LinkProps, { slots, attrs }) => {
 		const inFlight = ref(0);
-		const method = computed<Method>(() => props.method ?? "get");
+		const target = computed(() => resolveRouteProps(props));
+		const method = computed<Method>(() => target.value.method);
 		const element = computed(() => {
 			const as = props.as ?? "a";
 			return as.toLowerCase() === "a" && method.value !== "get" ? "button" : as;
 		});
 		const url = computed(() =>
-			method.value === "get" ? withQuery(props.href, props.data) : props.href,
+			method.value === "get"
+				? withQuery(target.value.url, props.data)
+				: target.value.url,
 		);
 		const visit = (): void => {
 			void router.visit(url.value, {
@@ -636,6 +646,9 @@ export const Link = defineComponent(
 		name: "Link",
 		props: [
 			"href",
+			"route",
+			"routeParams",
+			"qs",
 			"as",
 			"method",
 			"data",
@@ -829,8 +842,8 @@ export const Form = defineComponent(
 				{
 					...attrs,
 					ref: element,
-					action: props.action ?? "",
-					method: props.method ?? "get",
+					action: formTarget(props).url,
+					method: formTarget(props).method,
 					inert:
 						props.disableWhileProcessing === true && exposed.value.processing,
 					onSubmit: (event: SubmitEvent) => {
@@ -846,6 +859,9 @@ export const Form = defineComponent(
 		props: [
 			"action",
 			"method",
+			"route",
+			"routeParams",
+			"qs",
 			"headers",
 			"errorBag",
 			"transform",

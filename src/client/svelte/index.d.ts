@@ -1,6 +1,7 @@
 import type { Component, Snippet } from "svelte";
 import type { FormErrors, FormStore } from "../form.js";
 import type { FormComponentOptions, FormSlotProps } from "../formElement.js";
+import type { RouteName } from "../routes.js";
 import type { PhotonPageData } from "../hydrate.js";
 import type {
 	Method,
@@ -97,7 +98,10 @@ export declare const InfiniteScroll: Component<
 
 /** A link the router follows without a page load; a button for any method but GET. */
 export declare const Link: Component<{
-	href: string;
+	href?: string;
+	route?: RouteName;
+	routeParams?: Record<string, string | number>;
+	qs?: Record<string, string | number | boolean>;
 	as?: keyof HTMLElementTagNameMap;
 	method?: Method;
 	data?: RequestPayload;

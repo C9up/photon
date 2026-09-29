@@ -21,6 +21,7 @@ import {
 import { createApp, h } from "vue";
 import { Link as ReactLink } from "../../../src/client/react/index.js";
 import { bootRouter } from "../../../src/client/router.js";
+import { setRoutes } from "../../../src/client/routes.js";
 import { Link as VueLink } from "../../../src/client/vue/index.js";
 
 beforeAll(() => {
@@ -45,6 +46,10 @@ beforeEach(() => {
 			),
 	);
 	vi.stubGlobal("fetch", fetchMock);
+	setRoutes({
+		"users.show": { path: "/users/:id", methods: ["GET"] },
+		"users.update": { path: "/users/:id", methods: ["PUT"] },
+	});
 	bootRouter({
 		target: document.body,
 		adapter: { update() {}, unmount() {} },
@@ -117,6 +122,28 @@ describe.each([
 		const init: RequestInit | undefined = fetchMock.mock.calls[0]?.[1];
 		expect(init?.method).toBe("DELETE");
 		expect(init?.body).toBe('{"reason":"dup"}');
+	});
+
+	it("follows a named route, taking the route's method", async () => {
+		const target = render(
+			{ href: undefined, route: "users.show", routeParams: { id: 3 } },
+			"show",
+		);
+		expect(target.querySelector("a")?.getAttribute("href")).toBe("/users/3");
+		const update = render(
+			{
+				href: undefined,
+				route: "users.update",
+				routeParams: { id: 3 },
+				data: { a: 1 },
+			},
+			"save",
+		).querySelector("button");
+		update?.click();
+		await act(settle);
+		const init: RequestInit | undefined = fetchMock.mock.calls[0]?.[1];
+		expect(fetchMock.mock.calls[0]?.[0]).toBe("/users/3");
+		expect(init?.method).toBe("PUT");
 	});
 
 	it("leaves a modified click, or one aimed at another window, to the browser", async () => {
