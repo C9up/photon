@@ -11,6 +11,7 @@ import { pathToFileURL } from "node:url";
 import { PhotonError } from "./errors.js";
 import type { PhotonMiddlewareContext } from "./PhotonMiddleware.js";
 import { type PropsProtocolExtras, resolveProps } from "./props.js";
+import { isProtectedElsewhere, resolveNonce } from "./requestSecurity.js";
 import { type MetaTags, mergeMeta, serializeMetaTags } from "./seo/Meta.js";
 
 export type Framework = "react" | "vue" | "svelte";
@@ -612,6 +613,11 @@ export class PhotonRenderer {
 		const headTags = serializeMetaTags(
 			mergeMeta(this.#config.defaultMeta, meta),
 		);
+		// A policy that names a nonce blocks every script without it — with
+		// 'strict-dynamic', even the same-origin entry. Stamped on each tag.
+		const nonce = resolveNonce(requestContext);
+		const nonceAttr =
+			nonce === undefined ? "" : ` nonce="${escapeAttr(nonce)}"`;
 
 		const html = `<!DOCTYPE html>
 <html>
@@ -622,8 +628,8 @@ export class PhotonRenderer {
 </head>
 <body>
   <div id="app"${ssr ? ' data-server-rendered="true"' : ""}>${ssr?.body ?? ""}</div>
-  <script type="application/json" id="photon-data">${escapeScriptJson(pageDataJson)}</script>
-  ${assets.js.map((src) => `<script type="module" src="${escapeAttr(src)}"></script>`).join("\n  ")}
+  <script${nonceAttr} type="application/json" id="photon-data">${escapeScriptJson(pageDataJson)}</script>
+  ${assets.js.map((src) => `<script${nonceAttr} type="module" src="${escapeAttr(src)}"></script>`).join("\n  ")}
 </body>
 </html>`;
 
@@ -632,9 +638,17 @@ export class PhotonRenderer {
 			status: 200,
 			headers: {
 				"content-type": "text/html; charset=utf-8",
-				"content-security-policy": this.#buildCspHeader(),
-				"x-content-type-options": "nosniff",
-				"x-frame-options": "SAMEORIGIN",
+				// The protective headers belong to the security layer (blackhole):
+				// when it set any, a copy of Photon's would replace its policy, its
+				// nonce, its report-only mode and its DENY. Photon's own are the
+				// fallback for an app with no such layer.
+				...(isProtectedElsewhere(requestContext)
+					? {}
+					: {
+							"content-security-policy": this.#buildCspHeader(),
+							"x-content-type-options": "nosniff",
+							"x-frame-options": "SAMEORIGIN",
+						}),
 			},
 		};
 	}

@@ -34,6 +34,7 @@ import { createPhotonContext } from "./PhotonContext.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
 import { type PropsRequest, resolveProps } from "./props.js";
+import { readResponseHeader } from "./requestSecurity.js";
 import { type MetaTags, mergeMeta } from "./seo/Meta.js";
 import { getRouteMeta, resolveMeta } from "./seo/MetaDecorator.js";
 
@@ -252,24 +253,6 @@ function varyOnPhoton(res: Record<string, unknown>): void {
 		...(typeof existing === "object" && existing !== null ? existing : {}),
 		vary: value,
 	};
-}
-
-/** A response header, however the host exposes it. */
-function readResponseHeader(
-	res: Record<string, unknown>,
-	name: string,
-): string | undefined {
-	const getter = Reflect.get(res, "getHeader");
-	if (typeof getter === "function") {
-		const value = getter.call(res, name);
-		return typeof value === "string" ? value : undefined;
-	}
-	const bag = Reflect.get(res, "headers");
-	const value =
-		typeof bag === "object" && bag !== null
-			? Reflect.get(bag, name)
-			: undefined;
-	return typeof value === "string" ? value : undefined;
 }
 
 export class PhotonMiddleware {
