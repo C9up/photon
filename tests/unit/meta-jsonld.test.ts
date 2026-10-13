@@ -61,7 +61,7 @@ describe("photon > MetaTags.jsonLd", () => {
 			{
 				jsonLd: {
 					"@type": "Product",
-					name: "</script><script>alert(1)</script> ",
+					name: "</script><script>alert(1)</script>\u2028",
 				},
 			},
 			{ nonce: 'r4nd"0m' },
@@ -69,7 +69,7 @@ describe("photon > MetaTags.jsonLd", () => {
 		expect(html).not.toContain("</script><script>");
 		expect(html).toContain('nonce="r4nd&quot;0m"');
 		expect(jsonLdOf(html)).toMatchObject({
-			name: "</script><script>alert(1)</script> ",
+			name: "</script><script>alert(1)</script>\u2028",
 		});
 	});
 
