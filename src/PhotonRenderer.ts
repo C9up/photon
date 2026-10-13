@@ -610,14 +610,15 @@ export class PhotonRenderer {
 
 		const pageDataJson = JSON.stringify(pageData);
 		const assets = this.#getAssets();
-		const headTags = serializeMetaTags(
-			mergeMeta(this.#config.defaultMeta, meta),
-		);
 		// A policy that names a nonce blocks every script without it — with
 		// 'strict-dynamic', even the same-origin entry. Stamped on each tag.
 		const nonce = resolveNonce(requestContext);
 		const nonceAttr =
 			nonce === undefined ? "" : ` nonce="${escapeAttr(nonce)}"`;
+		const headTags = serializeMetaTags(
+			mergeMeta(this.#config.defaultMeta, meta),
+			nonce === undefined ? {} : { nonce },
+		);
 
 		const html = `<!DOCTYPE html>
 <html>
@@ -682,7 +683,8 @@ export class PhotonRenderer {
 				(finalMeta.keywords?.length ?? 0) > 0 ||
 				finalMeta.og !== undefined ||
 				finalMeta.twitter !== undefined ||
-				(finalMeta.custom?.length ?? 0) > 0);
+				(finalMeta.custom?.length ?? 0) > 0 ||
+				finalMeta.jsonLd !== undefined);
 		return {
 			html: JSON.stringify({
 				component,

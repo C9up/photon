@@ -1,5 +1,6 @@
 export type {
 	CustomMetaTag,
+	JsonLd,
 	MetaTags,
 	OgTags,
 	TwitterTags,

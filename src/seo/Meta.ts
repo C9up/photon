@@ -34,6 +34,14 @@ export interface CustomMetaTag {
 	content?: string;
 }
 
+/**
+ * Structured data for the page, as JSON-LD: one node, several, or a whole
+ * `{ "@context", "@graph" }` document — what `@c9up/ephemeris` builds
+ * (`SchemaGraph#toJsonLd()`, its helpers), or any plain object of the shape.
+ * Photon depends on the shape only, never on a package.
+ */
+export type JsonLd = object | readonly object[];
+
 export interface MetaTags {
 	title?: string;
 	description?: string;
@@ -43,6 +51,7 @@ export interface MetaTags {
 	og?: OgTags;
 	twitter?: TwitterTags;
 	custom?: CustomMetaTag[];
+	jsonLd?: JsonLd;
 }
 
 /**
@@ -86,17 +95,113 @@ function metaTag(attrs: Record<string, string | undefined>): string | null {
 
 /**
  * Serialize a `MetaTags` block into HTML lines for injection inside
- * `<head>`. Returns an empty string when no field is set.
+ * `<head>`. Returns an empty string when no field is set. The request's CSP
+ * nonce, when there is one, goes on the JSON-LD script.
  */
-export function serializeMetaTags(meta: MetaTags | undefined): string {
+export function serializeMetaTags(
+	meta: MetaTags | undefined,
+	options: { nonce?: string } = {},
+): string {
 	if (!meta) return "";
+	const jsonLd = jsonLdText(meta.jsonLd);
+	const nonce =
+		options.nonce === undefined || options.nonce === ""
+			? ""
+			: ` nonce="${escapeHtml(options.nonce)}"`;
 	const lines: string[] = [
 		...basicMetaTags(meta),
 		...(meta.og ? openGraphTags(meta.og) : []),
 		...(meta.twitter ? twitterTags(meta.twitter) : []),
 		...(meta.custom ? customMetaTags(meta.custom) : []),
+		...(jsonLd === undefined
+			? []
+			: [
+					`<script type="application/ld+json"${nonce} ${OWNED}>${jsonLd}</script>`,
+				]),
 	];
 	return lines.join("\n  ");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return false;
+	}
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+/** The nodes of a JSON-LD value: a document's `@graph`, a list, or one node. */
+function jsonLdNodes(value: JsonLd | undefined): Record<string, unknown>[] {
+	if (value === undefined) return [];
+	return [value].flat().flatMap((entry: unknown) => {
+		if (!isPlainObject(entry)) return [];
+		const graph = entry["@graph"];
+		if (Array.isArray(graph)) {
+			return graph.filter(isPlainObject);
+		}
+		// The document gets one context; a node keeps none of its own.
+		return [
+			Object.fromEntries(
+				Object.entries(entry).filter(([key]) => key !== "@context"),
+			),
+		];
+	});
+}
+
+/**
+ * The JSON-LD text for the page, or `undefined` when there is none: one
+ * document, `@graph` when there are several nodes. `<`, `>`, `&`, U+2028 and
+ * U+2029 are written as `\u` escapes, so no value can end the script.
+ */
+export function jsonLdText(value: JsonLd | undefined): string | undefined {
+	const nodes = jsonLdNodes(value);
+	if (nodes.length === 0) return undefined;
+	const document =
+		nodes.length === 1
+			? { "@context": "https://schema.org", ...nodes[0] }
+			: { "@context": "https://schema.org", "@graph": nodes };
+	return JSON.stringify(document).replace(
+		/[<>&\u2028\u2029]/g,
+		(character) =>
+			`\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+}
+
+/**
+ * Two layers' structured data as one: nodes with the same `@id` merge — the
+ * types united, what the later layer sets wins — and the rest follow in order.
+ */
+function mergeJsonLd(
+	earlier: JsonLd | undefined,
+	later: JsonLd | undefined,
+): Record<string, unknown>[] {
+	const byId = new Map<string, Record<string, unknown>>();
+	const out: Record<string, unknown>[] = [];
+	for (const node of [...jsonLdNodes(earlier), ...jsonLdNodes(later)]) {
+		const id = node["@id"];
+		const existing = typeof id === "string" ? byId.get(id) : undefined;
+		if (typeof id !== "string") {
+			out.push(node);
+			continue;
+		}
+		if (existing === undefined) {
+			const copy = { ...node };
+			byId.set(id, copy);
+			out.push(copy);
+			continue;
+		}
+		const types = [
+			...new Set(
+				[existing["@type"], node["@type"]]
+					.flat()
+					.filter((type) => typeof type === "string"),
+			),
+		];
+		Object.assign(existing, node);
+		if (types.length > 0)
+			existing["@type"] = types.length === 1 ? types[0] : types;
+	}
+	return out;
 }
 
 function pushTag(out: string[], tag: string | null): void {
@@ -229,6 +334,7 @@ export function mergeMeta(...layers: Array<MetaTags | undefined>): MetaTags {
 		if (layer.custom) {
 			out.custom = dedupeCustom([...(out.custom ?? []), ...layer.custom]);
 		}
+		if (layer.jsonLd) out.jsonLd = mergeJsonLd(out.jsonLd, layer.jsonLd);
 	}
 
 	return out;

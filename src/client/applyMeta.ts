@@ -16,7 +16,7 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import type { MetaTags } from "../seo/Meta.js";
+import { jsonLdText, type MetaTags } from "../seo/Meta.js";
 
 const PHOTON_OWNED_ATTR = "data-photon-meta";
 
@@ -60,6 +60,23 @@ export function applyMetaToDom(meta: MetaTags | undefined): void {
 	if (meta.og) applyOgMeta(head, meta.og);
 	if (meta.twitter) applyTwitterMeta(head, meta.twitter);
 	if (meta.custom) applyCustomMeta(head, meta.custom);
+	applyJsonLd(head, meta.jsonLd);
+}
+
+/**
+ * The page's structured data, replacing the previous page's: a graph left
+ * behind would describe page A to a crawler rendering page B.
+ */
+function applyJsonLd(head: HTMLHeadElement, jsonLd: MetaTags["jsonLd"]): void {
+	const text = jsonLdText(jsonLd);
+	if (text === undefined) return;
+	const el = document.createElement("script");
+	el.setAttribute("type", "application/ld+json");
+	// textContent is never parsed as HTML; the escapes keep it the same text
+	// the server writes.
+	el.textContent = text;
+	el.setAttribute(PHOTON_OWNED_ATTR, "1");
+	head.appendChild(el);
 }
 
 /** description / canonical / robots / keywords. */

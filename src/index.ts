@@ -60,6 +60,7 @@ export {
 // SEO / `<head>` management (Story 44.2)
 export type {
 	CustomMetaTag,
+	JsonLd,
 	MetaResolver,
 	MetaTags,
 	OgTags,
