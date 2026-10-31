@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { PhotonError } from "./errors.js";
 import type { PhotonMiddlewareContext } from "./PhotonMiddleware.js";
 import { type PropsProtocolExtras, resolveProps } from "./props.js";
-import { isProtectedElsewhere, resolveNonce } from "./requestSecurity.js";
+import { missingSecurityHeaders, resolveNonce } from "./requestSecurity.js";
 import { type MetaTags, mergeMeta, serializeMetaTags } from "./seo/Meta.js";
 
 export type Framework = "react" | "vue" | "svelte";
@@ -640,16 +640,14 @@ export class PhotonRenderer {
 			headers: {
 				"content-type": "text/html; charset=utf-8",
 				// The protective headers belong to the security layer (blackhole):
-				// when it set any, a copy of Photon's would replace its policy, its
-				// nonce, its report-only mode and its DENY. Photon's own are the
-				// fallback for an app with no such layer.
-				...(isProtectedElsewhere(requestContext)
-					? {}
-					: {
-							"content-security-policy": this.#buildCspHeader(),
-							"x-content-type-options": "nosniff",
-							"x-frame-options": "SAMEORIGIN",
-						}),
+				// a copy of Photon's would replace its policy, its nonce, its
+				// report-only mode and its DENY. Photon's own only fill what is
+				// missing, for an app with no such layer.
+				...missingSecurityHeaders(requestContext, {
+					"content-security-policy": this.#buildCspHeader(),
+					"x-content-type-options": "nosniff",
+					"x-frame-options": "SAMEORIGIN",
+				}),
 			},
 		};
 	}

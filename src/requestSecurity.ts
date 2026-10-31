@@ -6,13 +6,21 @@
  * application configured.
  */
 
-/** The protective headers Photon falls back to when nothing else set them. */
-const SECURITY_HEADERS = [
-	"content-security-policy",
-	"content-security-policy-report-only",
-	"x-frame-options",
-	"x-content-type-options",
-];
+/**
+ * The request-store key a security layer sets to say it decided the protective
+ * headers — blackhole puts the set it applied there, an empty one included.
+ */
+const SECURITY_HEADERS_KEY = "securityHeaders";
+
+/** The headers that answer the same protection as a fallback header. */
+const SAME_PROTECTION: Readonly<Record<string, readonly string[]>> = {
+	// A report-only policy is the layer's choice of CSP mode; an enforced one
+	// added beside it would block what it only meant to report.
+	"content-security-policy": [
+		"content-security-policy",
+		"content-security-policy-report-only",
+	],
+};
 
 /** A response header, however the host exposes it. */
 export function readResponseHeader(
@@ -33,18 +41,31 @@ export function readResponseHeader(
 }
 
 /**
- * Whether a security layer already protected this response.
+ * Which of Photon's fallback headers this response still needs.
  *
- * Any one of the headers is the sign: a layer that sets some of them and
- * leaves the others out (a `frameOptions: false`, a `noSniff: false`) chose
- * to, and Photon adding them back would undo that choice.
+ * A layer that decided the protective headers says so in the request store,
+ * and may have left one out on purpose (a `frameOptions: false`): Photon adds
+ * none then. Otherwise each protection is answered on its own — a header the
+ * response carries is kept, a missing one is filled — because one header set
+ * by someone says nothing about the others.
  */
-export function isProtectedElsewhere(ctx: object | undefined): boolean {
+export function missingSecurityHeaders(
+	ctx: object | undefined,
+	fallback: Readonly<Record<string, string>>,
+): Record<string, string> {
+	const store = ctx === undefined ? undefined : Reflect.get(ctx, "store");
+	if (store instanceof Map && store.has(SECURITY_HEADERS_KEY)) return {};
 	const res = ctx === undefined ? undefined : Reflect.get(ctx, "response");
-	if (typeof res !== "object" || res === null) return false;
-	return SECURITY_HEADERS.some(
-		(name) => readResponseHeader(res, name) !== undefined,
-	);
+	const present = (name: string): boolean =>
+		typeof res === "object" &&
+		res !== null &&
+		readResponseHeader(res, name) !== undefined;
+	const missing: Record<string, string> = {};
+	for (const [name, value] of Object.entries(fallback)) {
+		const answeredBy = SAME_PROTECTION[name] ?? [name];
+		if (!answeredBy.some(present)) missing[name] = value;
+	}
+	return missing;
 }
 
 /**

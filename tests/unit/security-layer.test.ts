@@ -86,12 +86,27 @@ describe("photon > pages behind a security layer", () => {
 	});
 
 	it("leaves out the headers the layer chose to leave out", async () => {
-		// frameOptions: false and noSniff: false — only the policy is set.
-		const { ctx, response } = makeCtx();
+		// frameOptions: false and noSniff: false — only the policy is set, and
+		// the layer says in the store that it decided the set.
+		const decided = { "content-security-policy": POLICY };
+		const { ctx, response } = makeCtx(new Map([["securityHeaders", decided]]));
 		response.header("content-security-policy", POLICY);
 		await renderPage(ctx, response);
+		expect(response.getHeader("content-security-policy")).toBe(POLICY);
 		expect(response.getHeader("x-frame-options")).toBeUndefined();
 		expect(response.getHeader("x-content-type-options")).toBeUndefined();
+	});
+
+	it("fills only the protections missing when no layer decided the set", async () => {
+		// A lone DENY says nothing about the policy or nosniff.
+		const { ctx, response } = makeCtx();
+		response.header("x-frame-options", "DENY");
+		await renderPage(ctx, response);
+		expect(response.getHeader("x-frame-options")).toBe("DENY");
+		expect(response.getHeader("content-security-policy")).toContain(
+			"default-src 'self'",
+		);
+		expect(response.getHeader("x-content-type-options")).toBe("nosniff");
 	});
 
 	it("falls back to its own headers when no layer set any", async () => {
