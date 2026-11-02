@@ -129,22 +129,35 @@ function rowsOf(props: Record<string, unknown>): number[] {
 		: [];
 }
 
+const CommentsPage = (props: Record<string, unknown>): ReactNode =>
+	createElement(
+		WhenVisible,
+		{
+			data: "comments",
+			fallback: () => createElement("p", null, "waiting"),
+		},
+		createElement("p", null, `comments ${JSON.stringify(props.comments)}`),
+	);
+
+const CountPage = (props: Record<string, unknown>): ReactNode => {
+	// A render-prop child is a prop; `createElement`'s children take nodes.
+	const visible: WhenVisibleProps = {
+		data: "n",
+		always: true,
+		as: "section",
+		children: ({ fetching }) =>
+			createElement("p", null, `n ${String(props.n)}${fetching ? "…" : ""}`),
+	};
+	return createElement(WhenVisible, visible);
+};
+
 describe("photon/react > WhenVisible wiring", () => {
 	it("reloads its props when its element comes into view, then stops watching", async () => {
 		const fetchMock = vi.fn(async () =>
 			jsonPage({ url: "/", props: { comments: ["hi"] } }),
 		);
 		vi.stubGlobal("fetch", fetchMock);
-		const Page = (props: Record<string, unknown>): ReactNode =>
-			createElement(
-				WhenVisible,
-				{
-					data: "comments",
-					fallback: () => createElement("p", null, "waiting"),
-				},
-				createElement("p", null, `comments ${JSON.stringify(props.comments)}`),
-			);
-		const target = await mountPage(Page, {
+		const target = await mountPage(CommentsPage, {
 			component: "Page",
 			framework: "react",
 			url: "/",
@@ -170,22 +183,7 @@ describe("photon/react > WhenVisible wiring", () => {
 			"fetch",
 			vi.fn(async () => jsonPage({ url: "/", props: { n: 2 } })),
 		);
-		const Page = (props: Record<string, unknown>): ReactNode => {
-			// A render-prop child is a prop; `createElement`'s children take nodes.
-			const visible: WhenVisibleProps = {
-				data: "n",
-				always: true,
-				as: "section",
-				children: ({ fetching }) =>
-					createElement(
-						"p",
-						null,
-						`n ${String(props.n)}${fetching ? "…" : ""}`,
-					),
-			};
-			return createElement(WhenVisible, visible);
-		};
-		const target = await mountPage(Page, {
+		const target = await mountPage(CountPage, {
 			component: "Page",
 			framework: "react",
 			url: "/",

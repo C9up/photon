@@ -76,6 +76,12 @@ async function until(ready: () => boolean, what: string): Promise<void> {
 	throw new Error(`never: ${what}`);
 }
 
+const Theme = createContext("light");
+
+function Themed(): ReactNode {
+	return createElement("p", null, useContext(Theme));
+}
+
 describe("photon/react > createPhotonApp on the server", () => {
 	it("renders App for the page and returns { head, body }, the page given to usePage", async () => {
 		const result = await createPhotonApp({
@@ -87,10 +93,6 @@ describe("photon/react > createPhotonApp on the server", () => {
 	});
 
 	it("renders what setup returns, App inside the app's own providers", async () => {
-		const Theme = createContext("light");
-		function Themed(): ReactNode {
-			return createElement("p", null, useContext(Theme));
-		}
 		const { body } = await createPhotonApp({
 			page: page({ component: "Themed" }),
 			render: renderToString,

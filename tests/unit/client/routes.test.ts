@@ -120,25 +120,25 @@ describe("photon/client > named routes", () => {
 
 describe("photon/client > resolvePageComponent", () => {
 	it("loads a lazy page, falls back through several paths, sets a layout", async () => {
-		const Page = { name: "Dashboard" };
-		const Layout = { name: "Layout" };
+		const dashboard = { name: "Dashboard" };
+		const layout = { name: "Layout" };
+		const loadDashboard = () => Promise.resolve({ default: dashboard });
 		const resolved = await resolvePageComponent(
 			["Admin/Dashboard", "Dashboard"],
-			{
-				Dashboard: () => Promise.resolve({ default: Page }),
-			},
-			Layout,
+			{ Dashboard: loadDashboard },
+			layout,
 		);
-		expect(resolved.default).toBe(Page);
-		expect(Reflect.get(Page, "layout")).toBe(Layout);
+		expect(resolved.default).toBe(dashboard);
+		expect(Reflect.get(dashboard, "layout")).toBe(layout);
 	});
 
 	it("says which page is missing, or badly exported", async () => {
+		const loadNothing = () => Promise.resolve({});
 		await expect(resolvePageComponent("Nope", {})).rejects.toThrow(
 			'Page not found: "Nope"',
 		);
 		await expect(
-			resolvePageComponent("Bad", { Bad: () => Promise.resolve({}) }),
+			resolvePageComponent("Bad", { Bad: loadNothing }),
 		).rejects.toThrow(/default export/);
 	});
 });

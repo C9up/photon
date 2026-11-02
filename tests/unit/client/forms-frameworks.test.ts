@@ -98,30 +98,30 @@ function type(input: HTMLInputElement | null, value: string): void {
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-describe("photon/react > useForm", () => {
-	function Signup(): ReactNode {
-		const form = useReactForm({ email: "" });
-		return createElement(
-			"div",
+function Signup(): ReactNode {
+	const form = useReactForm({ email: "" });
+	return createElement(
+		"div",
+		null,
+		createElement("input", {
+			value: form.data.email,
+			onChange: (event: { target: { value: string } }) =>
+				form.setData("email", event.target.value),
+		}),
+		createElement(
+			"button",
+			{ type: "button", onClick: () => void form.post("/signup") },
+			"go",
+		),
+		createElement(
+			"p",
 			null,
-			createElement("input", {
-				value: form.data.email,
-				onChange: (event: { target: { value: string } }) =>
-					form.setData("email", event.target.value),
-			}),
-			createElement(
-				"button",
-				{ type: "button", onClick: () => void form.post("/signup") },
-				"go",
-			),
-			createElement(
-				"p",
-				null,
-				`${form.errors.email ?? ""}|${form.isDirty ? "dirty" : "clean"}`,
-			),
-		);
-	}
+			`${form.errors.email ?? ""}|${form.isDirty ? "dirty" : "clean"}`,
+		),
+	);
+}
 
+describe("photon/react > useForm", () => {
 	it("shows the page's errors, then submits what was typed", async () => {
 		const target = renderReact(createElement(Signup));
 		await act(async () => target.querySelector("button")?.click());

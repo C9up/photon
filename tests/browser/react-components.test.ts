@@ -64,31 +64,29 @@ async function until(ready: () => boolean, what: string): Promise<void> {
 	throw new Error(`never: ${what}`);
 }
 
+/** Comments below a tall spacer, loaded once they scroll into view. */
+const CommentsPage = (props: Record<string, unknown>): ReactNode =>
+	createElement(
+		"div",
+		null,
+		createElement("div", { style: { height: "2000px" } }),
+		createElement(
+			WhenVisible,
+			{
+				data: "comments",
+				fallback: createElement("p", null, "waiting"),
+			},
+			createElement("p", null, `comments: ${JSON.stringify(props.comments)}`),
+		),
+	);
+
 describe("photon/react > WhenVisible in Chromium", () => {
 	it("loads its props once it scrolls into view, not before", async () => {
 		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
 			jsonPage({ url: location.pathname, props: { comments: ["first!"] } }),
 		);
 		vi.stubGlobal("fetch", fetchMock);
-		const Page = (props: Record<string, unknown>): ReactNode =>
-			createElement(
-				"div",
-				null,
-				createElement("div", { style: { height: "2000px" } }),
-				createElement(
-					WhenVisible,
-					{
-						data: "comments",
-						fallback: createElement("p", null, "waiting"),
-					},
-					createElement(
-						"p",
-						null,
-						`comments: ${JSON.stringify(props.comments)}`,
-					),
-				),
-			);
-		const target = await mountPage(Page, {
+		const target = await mountPage(CommentsPage, {
 			component: "Page",
 			framework: "react",
 			url: location.pathname,
@@ -121,6 +119,33 @@ function cursor(page: number, last: number) {
 	};
 }
 
+/** A short scroller over the users, one row per id. */
+const UsersPage = (props: Record<string, unknown>): ReactNode => {
+	const users = props.users;
+	const rows =
+		typeof users === "object" && users !== null
+			? Reflect.get(users, "data")
+			: [];
+	return createElement(
+		"div",
+		{ style: { height: "150px", overflowY: "auto" }, id: "scroller" },
+		createElement(
+			InfiniteScroll,
+			{
+				data: "users",
+				loading: createElement("p", { id: "loading" }, "loading…"),
+			},
+			(Array.isArray(rows) ? rows : []).map((row) =>
+				createElement(
+					"div",
+					{ key: String(row), style: { height: "100px" } },
+					`row ${String(row)}`,
+				),
+			),
+		),
+	);
+};
+
 describe("photon/react > InfiniteScroll in Chromium", () => {
 	it("renders the next page as the reader reaches the end, and says when it is loading", async () => {
 		vi.stubGlobal(
@@ -138,32 +163,7 @@ describe("photon/react > InfiniteScroll in Chromium", () => {
 				});
 			}),
 		);
-		const Page = (props: Record<string, unknown>): ReactNode => {
-			const users = props.users;
-			const rows =
-				typeof users === "object" && users !== null
-					? Reflect.get(users, "data")
-					: [];
-			return createElement(
-				"div",
-				{ style: { height: "150px", overflowY: "auto" }, id: "scroller" },
-				createElement(
-					InfiniteScroll,
-					{
-						data: "users",
-						loading: createElement("p", { id: "loading" }, "loading…"),
-					},
-					(Array.isArray(rows) ? rows : []).map((row) =>
-						createElement(
-							"div",
-							{ key: String(row), style: { height: "100px" } },
-							`row ${String(row)}`,
-						),
-					),
-				),
-			);
-		};
-		const target = await mountPage(Page, {
+		const target = await mountPage(UsersPage, {
 			component: "Page",
 			framework: "react",
 			url: location.pathname,
