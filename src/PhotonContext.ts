@@ -12,7 +12,11 @@ import type {
 	SsrRequestContext,
 } from "./PhotonRenderer.js";
 import { resolveProps } from "./props.js";
-import { type PhotonRequestInfo, readRequestInfo } from "./requestInfo.js";
+import {
+	type PhotonRequestInfo,
+	readRequestInfo,
+	shouldReloadForAssetVersion,
+} from "./requestInfo.js";
 import { type MetaTags, mergeMeta } from "./seo/Meta.js";
 
 export interface PhotonContext {
@@ -127,11 +131,24 @@ export function createPhotonContext(
 	// Set by `location()`, consumed once by the middleware.
 	let redirectTo: string | undefined;
 	const info = readRequestInfo(requestContext);
+	const session = historySessionOf(requestContext);
+
+	// A `clearHistory()` stored by an earlier request — the logout before the
+	// redirect — is consumed by the first page built after it. Not by a request
+	// about to be answered with the stale-version 409: the reload that follows
+	// is the page that must carry it.
+	const clearHistoryFromSession = (): boolean =>
+		session !== undefined &&
+		!shouldReloadForAssetVersion(info, renderer.getVersion()) &&
+		session.has(CLEAR_HISTORY_SESSION_KEY) &&
+		session.pull(CLEAR_HISTORY_SESSION_KEY, false) === true;
 
 	const resolvePageFlags = async (): Promise<PageFlags> => ({
 		// Omitted unless true: the client defaults both to false, so an
 		// ordinary page stays an ordinary page on the wire.
-		...(shouldClearHistory ? { clearHistory: true } : {}),
+		...(clearHistoryFromSession() || shouldClearHistory
+			? { clearHistory: true }
+			: {}),
 		...(shouldEncryptHistory ? { encryptHistory: true } : {}),
 		...(flashProvider ? { flash: await flashProvider() } : {}),
 	});
@@ -151,6 +168,9 @@ export function createPhotonContext(
 		},
 		clearHistory(): void {
 			shouldClearHistory = true;
+			// The usual caller redirects next, and a redirect carries no page:
+			// the session is what gets the instruction to the page after it.
+			session?.put(CLEAR_HISTORY_SESSION_KEY, true);
 		},
 		encryptHistory(encrypt = true): void {
 			shouldEncryptHistory = encrypt;
@@ -214,6 +234,39 @@ export function createPhotonContext(
 			stampResponse(requestContext, result.headers);
 			return result;
 		},
+	};
+}
+
+/** The session key a pending `clearHistory()` waits under across a redirect. */
+const CLEAR_HISTORY_SESSION_KEY = "photon.clear_history";
+
+/** The part of a session store `clearHistory()` needs. */
+interface HistorySession {
+	put(key: string, value: unknown): void;
+	has(key: string): boolean;
+	pull(key: string, fallback: unknown): unknown;
+}
+
+/** The request's session, when the host has one (duck-typed, like the flash bag). */
+function historySessionOf(ctx: unknown): HistorySession | undefined {
+	const session = Reflect.get(Object(ctx), "session");
+	if (typeof session !== "object" || session === null) return undefined;
+	const put = Reflect.get(session, "put");
+	const has = Reflect.get(session, "has");
+	const pull = Reflect.get(session, "pull");
+	if (
+		typeof put !== "function" ||
+		typeof has !== "function" ||
+		typeof pull !== "function"
+	) {
+		return undefined;
+	}
+	return {
+		put: (key, value) => {
+			Reflect.apply(put, session, [key, value]);
+		},
+		has: (key) => Reflect.apply(has, session, [key]) === true,
+		pull: (key, fallback) => Reflect.apply(pull, session, [key, fallback]),
 	};
 }
 
