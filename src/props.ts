@@ -532,9 +532,10 @@ export interface ResolvedProps {
  * The rules, in the order they apply — the same order upstream uses, because a
  * page's props depend on it:
  *
- *  1. A partial reload only counts for the SAME component. A client asking for
- *     a partial of `Users/Index` while the server is rendering `Posts/Index`
- *     gets the full set, never a half-filled page.
+ *  1. A partial reload only counts for the SAME component, named by the
+ *     client. A client asking for a partial of `Users/Index` while the server
+ *     is rendering `Posts/Index` — or naming no component at all — gets the
+ *     full set, never a half-filled page.
  *  2. `only` narrows to the named props; `except` removes them.
  *  3. An `always` prop survives both — that is what it is for.
  *  4. An `optional` prop is dropped unless explicitly named, and its resolver
@@ -554,7 +555,10 @@ export async function resolveProps(
 	const partialApplies =
 		partial !== undefined &&
 		(partial.only.length > 0 || partial.except.length > 0) &&
-		(partial.component === undefined || partial.component === component);
+		// An absent component header is not a match: nothing says the client
+		// is on this page, so it gets the standard visit.
+		partial.component !== undefined &&
+		partial.component === component;
 
 	const only = new Set(partialApplies ? partial.only : []);
 	const except = new Set(partialApplies ? partial.except : []);

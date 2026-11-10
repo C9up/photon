@@ -102,6 +102,27 @@ describe("photon > props", () => {
 		});
 		expect(out.props).toEqual({ a: 1, b: 2 });
 	});
+
+	it("ignores a partial reload that names no component", async () => {
+		// Only the data header: nothing says the client is on this page, so it
+		// gets the standard visit — required props kept, optional ones dropped.
+		const audit = vi.fn(() => ["secret-ish log"]);
+		const out = await resolveProps(
+			{ user: "ada", audit: optional(audit) },
+			"Users/Show",
+			{ only: ["audit"], except: [] },
+		);
+		expect(out.props).toEqual({ user: "ada" });
+		expect(audit).not.toHaveBeenCalled();
+	});
+
+	it("ignores an except list that names no component", async () => {
+		const out = await resolveProps({ a: 1, b: 2 }, "P", {
+			only: [],
+			except: ["a"],
+		});
+		expect(out.props).toEqual({ a: 1, b: 2 });
+	});
 });
 
 describe("photon > defer", () => {
