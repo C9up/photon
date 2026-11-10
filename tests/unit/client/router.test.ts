@@ -90,17 +90,21 @@ async function bootHydratedReactPage(
 	return state;
 }
 
+/**
+ * An anchor the router follows: opted in with `data-photon` unless
+ * `dataPhoton: null` asks for a plain one.
+ */
 function createAnchor(opts: {
 	href: string;
 	target?: string;
 	download?: boolean;
-	dataPhoton?: string;
+	dataPhoton?: string | null;
 }): HTMLAnchorElement {
 	const a = document.createElement("a");
 	a.setAttribute("href", opts.href);
 	if (opts.target) a.setAttribute("target", opts.target);
 	if (opts.download) a.setAttribute("download", "");
-	if (opts.dataPhoton) a.dataset.photon = opts.dataPhoton;
+	if (opts.dataPhoton !== null) a.dataset.photon = opts.dataPhoton ?? "";
 	document.body.appendChild(a);
 	return a;
 }
@@ -141,7 +145,7 @@ afterEach(() => {
 });
 
 describe("photon/client > router — interception", () => {
-	it("intercepts a same-origin internal anchor and fetches with X-Photon header", async () => {
+	it("intercepts a same-origin anchor opted in with data-photon and fetches with X-Photon header", async () => {
 		const state = await bootHydratedReactPage();
 		const anchor = createAnchor({ href: "/orders" });
 
@@ -186,6 +190,40 @@ describe("photon/client > router — interception", () => {
 		expect(state.resolveComponent).toHaveBeenCalledWith("Orders");
 		expect(state.reactRender).toHaveBeenCalledTimes(1);
 		expect(pushState).toHaveBeenCalledTimes(1);
+	});
+
+	it("leaves a plain anchor to the browser, so its URL is requested once", async () => {
+		// A plain anchor may lead anywhere — a single-use magic link, an export,
+		// a page that is not Photon's. Fetching it first and then navigating to
+		// it when the answer was not a page sent the same GET twice.
+		await bootHydratedReactPage();
+		const anchor = createAnchor({
+			href: "/auth/magic?token=abc",
+			dataPhoton: null,
+		});
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		const event = dispatchClick(anchor);
+		await new Promise((r) => setTimeout(r, 0));
+
+		expect(event.defaultPrevented).toBe(false);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("leaves an anchor nested in a plain one to the browser", async () => {
+		await bootHydratedReactPage();
+		const anchor = createAnchor({ href: "/export.csv", dataPhoton: null });
+		const inner = document.createElement("span");
+		anchor.appendChild(inner);
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		const event = dispatchClick(inner);
+		await new Promise((r) => setTimeout(r, 0));
+
+		expect(event.defaultPrevented).toBe(false);
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it("does not intercept clicks with target=_blank", async () => {

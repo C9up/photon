@@ -228,6 +228,12 @@ function isInterceptableUrl(url: URL, anchor: HTMLAnchorElement): boolean {
 	if (target && target !== "" && target !== "_self") return false;
 
 	if (anchor.hasAttribute("download")) return false;
+	// Opt-in, as upstream: a framework `Link` handles its own click, and a
+	// plain anchor is followed only when it carries `data-photon`. Any other
+	// anchor may lead to a magic link, an export or a page that is not
+	// Photon's; fetching it first, then navigating to it when the answer was
+	// no page, sent the same GET twice.
+	if (!anchor.hasAttribute("data-photon")) return false;
 	if (anchor.dataset.photon === "external") return false;
 
 	return true;

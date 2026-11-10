@@ -69,6 +69,7 @@ describe("photon/client > integration roundtrip", () => {
 		// 4. SPA-nav: simulate a click on a same-origin link.
 		const a = document.createElement("a");
 		a.setAttribute("href", "/orders");
+		a.setAttribute("data-photon", "");
 		a.textContent = "Orders";
 		document.body.appendChild(a);
 
