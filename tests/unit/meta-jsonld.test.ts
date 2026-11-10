@@ -129,6 +129,29 @@ describe("photon > MetaTags.jsonLd", () => {
 			},
 		]);
 	});
+
+	it("merges a parsed node carrying an own __proto__ key as plain data", () => {
+		// JSON.parse makes `__proto__` an OWN key. Assigned onto the earlier
+		// node, it re-parented it, and the whole node then vanished from the page.
+		const merged = mergeMeta(
+			{ jsonLd: { "@id": "x", "@type": "Thing", name: "a" } },
+			{
+				jsonLd: JSON.parse(
+					'{"@id":"x","@type":"Thing","__proto__":{"evil":"yes"}}',
+				),
+			},
+		);
+		const nodes = [merged.jsonLd].flat();
+		expect(nodes).toHaveLength(1);
+		const node = nodes[0];
+		expect(Object.getPrototypeOf(node)).toBe(Object.prototype);
+		expect(Reflect.get(Object(node), "evil")).toBeUndefined();
+		expect(Reflect.get(Object(node), "name")).toBe("a");
+
+		const json = jsonLdOf(`${serializeMetaTags(merged)}`);
+		expect(json).toMatchObject({ "@id": "x", "@type": "Thing", name: "a" });
+		expect(Object.getPrototypeOf(json)).toBe(Object.prototype);
+	});
 });
 
 describe("photon > PhotonRenderer and JSON-LD", () => {

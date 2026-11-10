@@ -175,19 +175,20 @@ function mergeJsonLd(
 	earlier: JsonLd | undefined,
 	later: JsonLd | undefined,
 ): Record<string, unknown>[] {
-	const byId = new Map<string, Record<string, unknown>>();
+	// Where each `@id` sits in `out`, so a later node replaces its slot.
+	const slotById = new Map<string, number>();
 	const out: Record<string, unknown>[] = [];
 	for (const node of [...jsonLdNodes(earlier), ...jsonLdNodes(later)]) {
 		const id = node["@id"];
-		const existing = typeof id === "string" ? byId.get(id) : undefined;
 		if (typeof id !== "string") {
 			out.push(node);
 			continue;
 		}
-		if (existing === undefined) {
-			const copy = { ...node };
-			byId.set(id, copy);
-			out.push(copy);
+		const slot = slotById.get(id);
+		const existing = slot === undefined ? undefined : out[slot];
+		if (slot === undefined || existing === undefined) {
+			slotById.set(id, out.length);
+			out.push({ ...node });
 			continue;
 		}
 		const types = [
@@ -197,9 +198,15 @@ function mergeJsonLd(
 					.filter((type) => typeof type === "string"),
 			),
 		];
-		Object.assign(existing, node);
+		// Built from entries, not `Object.assign`: a parsed node can carry an
+		// OWN `__proto__` key, and assigning it re-parented the merged node.
+		const merged = Object.fromEntries([
+			...Object.entries(existing),
+			...Object.entries(node),
+		]);
 		if (types.length > 0)
-			existing["@type"] = types.length === 1 ? types[0] : types;
+			merged["@type"] = types.length === 1 ? types[0] : types;
+		out[slot] = merged;
 	}
 	return out;
 }
