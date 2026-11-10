@@ -33,7 +33,11 @@ declare module "@c9up/ream" {
 import { createPhotonContext } from "./PhotonContext.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
-import { readRequestUrl, shouldReloadForAssetVersion } from "./requestInfo.js";
+import {
+	readRequestHeader,
+	readRequestUrl,
+	shouldReloadForAssetVersion,
+} from "./requestInfo.js";
 import { readResponseHeader } from "./requestSecurity.js";
 import { getRouteMeta, resolveMeta } from "./seo/MetaDecorator.js";
 
@@ -66,6 +70,10 @@ export interface ValidationErrorOptions {
  * message unless `allMessages` asks for the list. Nothing flashed, or no
  * session at all, gives `{}` — never undefined, because a component that has
  * to guard every read is a component that will forget to.
+ *
+ * An `x-photon-error-bag` header scopes them, which is how two forms on one
+ * page keep their messages apart — but only when there are errors: the client
+ * reads any key in `errors` as a failed submission.
  */
 export function getValidationErrors(
 	ctx: unknown,
@@ -81,6 +89,8 @@ export function getValidationErrors(
 			errors[field] = Array.isArray(messages) ? messages[0] : messages;
 		}
 	}
+	const errorBag = readRequestHeader(ctx, "x-photon-error-bag");
+	if (errorBag && Object.keys(errors).length > 0) return { [errorBag]: errors };
 	return errors;
 }
 
@@ -274,13 +284,9 @@ export class PhotonMiddleware {
 			ctx.photon = photon;
 
 			// Validation errors are shared with every page: a form component reads
-			// `errors.email` unconditionally, so the key has to be there. An
-			// error-bag header scopes them, which is how two forms on one page
-			// keep their messages apart. A controller's own `errors` prop wins.
-			const errors = getValidationErrors(ctx);
-			photon.share({
-				errors: info.errorBag ? { [info.errorBag]: errors } : errors,
-			});
+			// `errors.email` unconditionally, so the key has to be there. A
+			// controller's own `errors` prop wins.
+			photon.share({ errors: getValidationErrors(ctx) });
 
 			const res = ctx.response as Record<string, unknown> | undefined;
 			if (res) varyOnPhoton(res);

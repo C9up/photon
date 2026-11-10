@@ -5,7 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { createPhotonContext } from "../../src/PhotonContext.js";
-import { getValidationErrors } from "../../src/PhotonMiddleware.js";
+import {
+	getValidationErrors,
+	PhotonMiddleware,
+	type PhotonMiddlewareContext,
+} from "../../src/PhotonMiddleware.js";
 import { PhotonRenderer, type SsrConfig } from "../../src/PhotonRenderer.js";
 
 function context(encryptHistory?: boolean) {
@@ -153,6 +157,52 @@ describe("photon > validation errors", () => {
 				allMessages: true,
 			}),
 		).toEqual({ email: ["Required"] });
+	});
+
+	const withBag = (errorBag: string, bag: unknown): unknown => ({
+		request: {
+			header: (name: string) =>
+				name === "x-photon-error-bag" ? errorBag : undefined,
+		},
+		session: {
+			flashMessages: {
+				get: (path: string, fallback?: unknown) =>
+					path === "inputErrorsBag" ? bag : fallback,
+			},
+		},
+	});
+
+	it("scopes the errors under the error bag the request names", () => {
+		expect(
+			getValidationErrors(withBag("login", { email: ["Required"] })),
+		).toEqual({ login: { email: "Required" } });
+	});
+
+	it("emits no bag at all when there are no errors", () => {
+		// Any key in `errors` reads as a failed submission, so an empty bag
+		// would report a successful one as failed.
+		expect(getValidationErrors(withBag("login", {}))).toEqual({});
+	});
+
+	it("shares an empty error set, not an empty bag, through the middleware", async () => {
+		const mw = new PhotonMiddleware({
+			framework: "react",
+			entryClient: "resources/app.tsx",
+		});
+		const ctx: PhotonMiddlewareContext = {
+			request: {
+				method: () => "GET",
+				path: () => "/",
+				header: (name) =>
+					({ "x-photon": "true", "x-photon-error-bag": "login" })[name],
+			},
+		};
+		let page: Record<string, unknown> = {};
+		await mw.middleware()(ctx, async () => {
+			const out = await ctx.photon?.render("Login", {});
+			page = JSON.parse(out?.html ?? "{}");
+		});
+		expect(page.props).toEqual({ errors: {} });
 	});
 });
 
