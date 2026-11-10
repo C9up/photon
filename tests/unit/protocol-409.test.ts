@@ -107,6 +107,53 @@ describe("photon > 409 protocol flows", () => {
 		expect(written.status).not.toBe(303);
 	});
 
+	it("reflashes the session on a stale-version reload", async () => {
+		// The messages this request consumed must survive the hard reload,
+		// or a "Saved" landing right after a deploy is never shown.
+		const mw = new PhotonMiddleware(baseConfig);
+		const { ctx, written } = harness({
+			"x-photon": "true",
+			"x-photon-version": "outdated",
+		});
+		let reflashes = 0;
+		ctx.session = {
+			reflash: () => {
+				reflashes += 1;
+			},
+		};
+		await run(mw, ctx);
+		expect(written.status).toBe(409);
+		expect(reflashes).toBe(1);
+	});
+
+	it("does not reflash for an explicit location()", async () => {
+		const mw = new PhotonMiddleware(baseConfig);
+		const { ctx, written } = harness({ "x-photon": "true" });
+		let reflashes = 0;
+		ctx.session = {
+			reflash: () => {
+				reflashes += 1;
+			},
+		};
+		await run(mw, ctx, async () => {
+			const photon = Reflect.get(Object(ctx), "photon");
+			Reflect.get(Object(photon), "location").call(photon, "/elsewhere");
+		});
+		expect(written.status).toBe(409);
+		expect(reflashes).toBe(0);
+	});
+
+	it("answers a stale version without a session", async () => {
+		const mw = new PhotonMiddleware(baseConfig);
+		const { ctx, written } = harness({
+			"x-photon": "true",
+			"x-photon-version": "outdated",
+		});
+		ctx.session = {};
+		await run(mw, ctx);
+		expect(written.status).toBe(409);
+	});
+
 	it("ignores all of it for a non-SPA request", async () => {
 		const mw = new PhotonMiddleware(baseConfig);
 		const { ctx, written } = harness({}, "DELETE", 302);

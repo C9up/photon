@@ -165,6 +165,14 @@ async function seedRouteMeta(
  *   const photon = PhotonMiddleware({ framework: 'react', entryClient: '...', ssr: { enabled: true, entrypoint: '...' } })
  *   app.use(photon.middleware())
  */
+/** Keep the session's flash messages for one more request, when it has them. */
+function reflashSession(ctx: unknown): void {
+	const session = Reflect.get(Object(ctx), "session");
+	if (typeof session !== "object" || session === null) return;
+	const reflash = Reflect.get(session, "reflash");
+	if (typeof reflash === "function") reflash.call(session);
+}
+
 /** Methods whose redirect must become a 303 so the next hop is a GET. */
 const MUTATION_METHODS = new Set(["PUT", "PATCH", "DELETE"]);
 
@@ -301,9 +309,12 @@ export class PhotonMiddleware {
 				// An explicit `location()` wins; otherwise a stale asset version
 				// forces a hard reload of the SAME url so the client picks up the
 				// new bundles.
-				const target =
-					explicit ??
-					(shouldReloadForAssetVersion(info, version) ? url : undefined);
+				const stale =
+					explicit === undefined && shouldReloadForAssetVersion(info, version);
+				const target = explicit ?? (stale ? url : undefined);
+				// The flash messages this request consumed must survive the hard
+				// reload, or a "Saved" landing right after a deploy is never shown.
+				if (stale) reflashSession(ctx);
 				if (target !== undefined) {
 					writeResponse(res, 409, {
 						"x-photon-location": target,
