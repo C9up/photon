@@ -56,10 +56,25 @@ export function readRequestMethod(ctx: unknown): string {
 	return typeof viaMethod === "string" ? viaMethod.toUpperCase() : "GET";
 }
 
-/** The URL the client is on. */
+/**
+ * The URL the client is on, query string included — upstream's
+ * `request.url(true)`.
+ *
+ * The page's `url` is what the client writes to the address bar, and the
+ * stale-version reload goes back to it: without the query, `/users?page=2`
+ * became `/users` on every visit. A Node-style `url` string already carries
+ * the query; `path()` is the last resort.
+ */
 export function readRequestUrl(ctx: unknown): string {
 	const req = Reflect.get(Object(ctx), "request");
 	if (typeof req !== "object" || req === null) return "/";
+	const url = Reflect.get(req, "url");
+	if (typeof url === "function") {
+		const value = url.call(req, true);
+		if (typeof value === "string" && value !== "") return value;
+	} else if (typeof url === "string" && url !== "") {
+		return url;
+	}
 	const pathname = Reflect.get(req, "path");
 	if (typeof pathname === "function") {
 		const value = pathname.call(req);

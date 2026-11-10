@@ -88,6 +88,8 @@ export interface PhotonMiddlewareContext {
 	request?: {
 		method(): string;
 		path(): string;
+		/** Path + query when asked for it (ream's `url(true)`); the page url. */
+		url?(includeQueryString?: boolean): string;
 		header(name: string): string | undefined;
 	};
 	response?: {
