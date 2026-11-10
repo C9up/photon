@@ -98,6 +98,18 @@ export interface PhotonConfig<Ctx = SsrRequestContext> {
 	/** Vite dev server URL (default: 'http://localhost:5173'). */
 	viteDevUrl?: string;
 	/**
+	 * Serve pages through the Vite dev server: its scripts, no manifest, no
+	 * asset versioning, a CSP that lets its websocket in, SSR compiled per
+	 * render.
+	 *
+	 * Without it, the environment decides and fails closed: development only
+	 * under `ream dev` (`REAM_DEV=true`) or when `NODE_ENV` names development
+	 * or test (`dev`, `develop`, `testing`, … as ream reads them). An unset
+	 * `NODE_ENV`, `prod` or `staging` is production — a deployment that never
+	 * set it must not load its scripts from `localhost`.
+	 */
+	dev?: boolean;
+	/**
 	 * Application-wide default `<head>` metadata. Per-route values
 	 * (decorator / `ctx.photon.meta()` / explicit `render()` arg) merge
 	 * on top — last wins per leaf field.
@@ -180,6 +192,21 @@ interface ViteManifestEntry {
 	imports?: string[];
 }
 
+/** `NODE_ENV` spellings for development and test, as ream normalises them. */
+const DEV_NODE_ENVS = new Set(["dev", "develop", "development"]);
+const TEST_NODE_ENVS = new Set(["test", "testing"]);
+
+/**
+ * Whether the environment explicitly asks for the dev server: `ream dev`
+ * says so with `REAM_DEV`, and a test run uses it as upstream's does. Anything
+ * else — `NODE_ENV` unset included — is production.
+ */
+function runsInDevelopment(): boolean {
+	if (process.env.REAM_DEV === "true") return true;
+	const env = (process.env.NODE_ENV ?? "").toLowerCase();
+	return DEV_NODE_ENVS.has(env) || TEST_NODE_ENVS.has(env);
+}
+
 /**
  * Photon Renderer — handles SSR and page data serialization.
  */
@@ -233,7 +260,7 @@ export class PhotonRenderer {
 
 	constructor(config: PhotonConfig) {
 		this.#config = config;
-		this.#isDev = process.env.NODE_ENV !== "production";
+		this.#isDev = config.dev ?? runsInDevelopment();
 		if (this.#isDev) {
 			this.#viteOrigin = getSafeOrigin(
 				this.#config.viteDevUrl ?? "http://localhost:5173",
