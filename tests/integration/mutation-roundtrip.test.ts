@@ -48,7 +48,6 @@ async function handle(
 		return;
 	}
 	const out = await ctx.photon?.render("Order", { id, ...orders.get(id) });
-	response.header("content-type", "text/html; charset=utf-8");
 	response.send(out?.html ?? "");
 }
 

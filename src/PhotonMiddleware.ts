@@ -33,9 +33,8 @@ declare module "@c9up/ream" {
 import { createPhotonContext } from "./PhotonContext.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
-import { type PropsRequest, resolveProps } from "./props.js";
+import { readRequestUrl, shouldReloadForAssetVersion } from "./requestInfo.js";
 import { readResponseHeader } from "./requestSecurity.js";
-import { type MetaTags, mergeMeta } from "./seo/Meta.js";
 import { getRouteMeta, resolveMeta } from "./seo/MetaDecorator.js";
 
 /** The single surface these validation errors need of a session flash bag. */
@@ -154,28 +153,8 @@ async function seedRouteMeta(
  *   const photon = PhotonMiddleware({ framework: 'react', entryClient: '...', ssr: { enabled: true, entrypoint: '...' } })
  *   app.use(photon.middleware())
  */
-/** A comma-separated header list, trimmed and without empties. */
-function splitHeaderList(raw: string | undefined): string[] {
-	if (raw === undefined || raw.trim() === "") return [];
-	return raw
-		.split(",")
-		.map((part) => part.trim())
-		.filter((part) => part.length > 0);
-}
-
 /** Methods whose redirect must become a 303 so the next hop is a GET. */
 const MUTATION_METHODS = new Set(["PUT", "PATCH", "DELETE"]);
-
-/** The request method, however the host exposes it. */
-function readMethod(ctx: PhotonMiddlewareContext): string {
-	const req = Reflect.get(Object(ctx), "request");
-	const viaMethod = Reflect.get(Object(req), "method");
-	if (typeof viaMethod === "function") {
-		const value = viaMethod.call(req);
-		return typeof value === "string" ? value.toUpperCase() : "GET";
-	}
-	return typeof viaMethod === "string" ? viaMethod.toUpperCase() : "GET";
-}
 
 /** The status already set on the response, however the host exposes it. */
 function readStatus(res: Record<string, unknown>): number | undefined {
@@ -277,141 +256,46 @@ export class PhotonMiddleware {
 			}
 			await this.#bootPromise;
 
-			const req = ctx.request as Record<string, unknown> | undefined;
-			const url = req
-				? typeof req.path === "function"
-					? (req.path as () => string)()
-					: ((req.path as string) ?? "/")
-				: "/";
-
-			let lastRenderArgs:
-				| {
-						component: string;
-						props: Record<string, unknown>;
-						sharedKeys: string[];
-						url: string;
-						metaOverride?: MetaTags;
-				  }
-				| undefined;
+			const url = readRequestUrl(ctx);
 			// The context goes through so an `ssr.pages` predicate can decide on
-			// the request, as upstream's does. Nothing is stored on the
-			// renderer — it stays a singleton, this is a per-call argument.
-			const baseContext = createPhotonContext(this.#renderer, url, ctx);
-			// What has been shared so far. The props response is rebuilt after the
-			// handler returns, from what `render()` was given — and a shared prop,
-			// `errors` included, was never given to it, so SPA navigations lost
-			// every one. Kept here as the context keeps it, and read at render time.
-			let shared: Record<string, unknown> = {};
-			const share = (data: Record<string, unknown>): void => {
-				shared = { ...shared, ...data };
-				baseContext.share(data);
-			};
+			// the request, as upstream's does, and so `render()` knows from the
+			// protocol headers whether it answers a page load or a props request.
+			// Nothing is stored on the renderer — it stays a singleton.
+			const photon = createPhotonContext(this.#renderer, url, ctx);
+			const info = photon.requestInfo();
 
 			// Seed the per-request meta accumulator from `@Meta()` on the
 			// route handler before next() so the controller can still
 			// override via `ctx.photon.meta(...)`.
-			await seedRouteMeta(baseContext, ctx);
+			await seedRouteMeta(photon, ctx);
 
-			ctx.photon = {
-				render: async (component, props = {}, meta) => {
-					lastRenderArgs = {
-						component,
-						props: { ...shared, ...props },
-						sharedKeys: Object.keys(shared),
-						url,
-						metaOverride: meta,
-					};
-					return baseContext.render(component, props, meta);
-				},
-				share,
-				clearHistory: () => baseContext.clearHistory(),
-				encryptHistory: (encrypt) => baseContext.encryptHistory(encrypt),
-				flash: (provider) => baseContext.flash(provider),
-				resolvePageFlags: () => baseContext.resolvePageFlags(),
-				getVersion: () => baseContext.getVersion(),
-				ssrEnabled: (component) => baseContext.ssrEnabled(component),
-				sharedKeys: () => baseContext.sharedKeys(),
-				meta: (tags) => baseContext.meta(tags),
-				getAccumulatedMeta: () => baseContext.getAccumulatedMeta(),
-				location: (target) => baseContext.location(target),
-				takeLocation: () => baseContext.takeLocation(),
-			};
-
-			const readHeader = (name: string): string | undefined => {
-				if (!req) return undefined;
-				const viaMethod = Reflect.get(Object(req), "header");
-				if (typeof viaMethod === "function") {
-					const value = viaMethod.call(req, name);
-					return typeof value === "string" ? value : undefined;
-				}
-				const bag = Reflect.get(Object(req), "headers");
-				const value =
-					typeof bag === "object" && bag !== null
-						? Reflect.get(bag, name)
-						: undefined;
-				return typeof value === "string" ? value : undefined;
-			};
-			const isPhotonRequest = readHeader("x-photon") === "true";
-			// Partial reload (AdonisJS Inertia's `x-inertia-partial-*`): reload a
-			// page without recomputing every prop. `component` guards it — a
-			// client asking about another page must not get a half-filled one.
-			const partial: PropsRequest = {
-				only: splitHeaderList(readHeader("x-photon-partial-data")),
-				except: splitHeaderList(readHeader("x-photon-partial-except")),
-				component: readHeader("x-photon-partial-component"),
-				// `reset` says "replace these, do not merge them" — the client
-				// clearing a list before loading its first page again.
-				reset: splitHeaderList(readHeader("x-photon-reset")),
-				// Once-keys the client still holds: those props are not resolved.
-				exceptOnce: splitHeaderList(readHeader("x-photon-except-once-props")),
-				// Which way a scroll prop's new page joins the rows already shown.
-				mergeIntent:
-					readHeader("x-photon-infinite-scroll-merge-intent") === "prepend"
-						? "prepend"
-						: "append",
-			};
+			ctx.photon = photon;
 
 			// Validation errors are shared with every page: a form component reads
 			// `errors.email` unconditionally, so the key has to be there. An
 			// error-bag header scopes them, which is how two forms on one page
 			// keep their messages apart. A controller's own `errors` prop wins.
-			const errorBag = readHeader("x-photon-error-bag");
 			const errors = getValidationErrors(ctx);
-			share({ errors: errorBag ? { [errorBag]: errors } : errors });
+			photon.share({
+				errors: info.errorBag ? { [info.errorBag]: errors } : errors,
+			});
 
 			const res = ctx.response as Record<string, unknown> | undefined;
 			if (res) varyOnPhoton(res);
 
 			await next();
 
-			const ct = res ? readResponseHeader(res, "content-type") : undefined;
-
 			// A 409 tells the SPA client to leave the fetch loop and navigate for
-			// real. Two things ask for it, and both must be answered BEFORE any
-			// props are rendered — there is no page to send in either case.
-			if (isPhotonRequest && res) {
-				const explicit = ctx.photon?.takeLocation?.();
+			// real. Two things ask for it; there is no page to send in either case.
+			if (info.isPhotonRequest && res) {
+				const explicit = (ctx.photon ?? photon).takeLocation();
 				const version = this.#renderer.getVersion();
-				// ABSENT means "this client does not speak versioning", not
-				// "version empty". AdonisJS never meets the case — its client
-				// always sends the header — but ours predates it, and forcing a
-				// reload on every one of those requests would break them all.
-				const clientVersion = readHeader("x-photon-version");
-				const method = readMethod(ctx);
 				// An explicit `location()` wins; otherwise a stale asset version
 				// forces a hard reload of the SAME url so the client picks up the
-				// new bundles. Only on GET: replaying a mutation would be worse
-				// than a stale page.
+				// new bundles.
 				const target =
 					explicit ??
-					(method === "GET" &&
-					clientVersion !== undefined &&
-					clientVersion !== version
-						? // The CURRENT url, not the last render: a stale version
-							// must reload where the client actually is, and it may
-							// have been rejected before any render ran.
-							url
-						: undefined);
+					(shouldReloadForAssetVersion(info, version) ? url : undefined);
 				if (target !== undefined) {
 					writeResponse(res, 409, {
 						"x-photon-location": target,
@@ -422,51 +306,13 @@ export class PhotonMiddleware {
 				// A 302 after a mutation makes the browser repeat the method on
 				// the next hop; 303 forces the GET the client expects.
 				if (
-					MUTATION_METHODS.has(method) &&
+					MUTATION_METHODS.has(info.method) &&
 					readStatus(res) === 302 &&
 					typeof res.status === "function"
 				) {
 					const setStatus = Reflect.get(res, "status");
 					if (typeof setStatus === "function") setStatus.call(res, 303);
 				}
-			}
-
-			if (
-				isPhotonRequest &&
-				lastRenderArgs &&
-				ct?.includes("text/html") &&
-				res
-			) {
-				// Forward whatever the SSR pipeline would have serialized into
-				// `<head>` (decorator seed + imperative ctx.photon.meta() +
-				// render-call override). The renderer composes this with the
-				// global `defaultMeta`.
-				const finalMeta = mergeMeta(
-					baseContext.getAccumulatedMeta(),
-					lastRenderArgs.metaOverride,
-				);
-				// Resolve the props against the partial request: `only`/`except`
-				// narrow the set, `always()` survives it, and an `optional()`
-				// resolver runs ONLY if it was named.
-				const resolved = await resolveProps(
-					lastRenderArgs.props,
-					lastRenderArgs.component,
-					partial,
-				);
-				const propsOnly = this.#renderer.renderProps(
-					lastRenderArgs.component,
-					resolved.props,
-					lastRenderArgs.url,
-					finalMeta,
-					{
-						...resolved.extras,
-						...(lastRenderArgs.sharedKeys.length > 0
-							? { sharedProps: lastRenderArgs.sharedKeys }
-							: {}),
-						...(await baseContext.resolvePageFlags()),
-					},
-				);
-				writeResponse(res, propsOnly.status, propsOnly.headers, propsOnly.html);
 			}
 		};
 	}

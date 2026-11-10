@@ -11,6 +11,8 @@ import type {
 	RenderResult,
 	SsrRequestContext,
 } from "./PhotonRenderer.js";
+import { resolveProps } from "./props.js";
+import { type PhotonRequestInfo, readRequestInfo } from "./requestInfo.js";
 import { type MetaTags, mergeMeta } from "./seo/Meta.js";
 
 export interface PhotonContext {
@@ -91,6 +93,11 @@ export interface PhotonContext {
 	resolvePageFlags(): Promise<PageFlags>;
 	/** Internal: the pending `location()` target, cleared once read. */
 	takeLocation(): string | undefined;
+	/**
+	 * What the protocol headers say about this request: a page load or a props
+	 * request, the partial reload it asks for, the client's asset version.
+	 */
+	requestInfo(): PhotonRequestInfo;
 }
 
 /**
@@ -119,6 +126,15 @@ export function createPhotonContext(
 	let flashProvider: (() => unknown) | undefined;
 	// Set by `location()`, consumed once by the middleware.
 	let redirectTo: string | undefined;
+	const info = readRequestInfo(requestContext);
+
+	const resolvePageFlags = async (): Promise<PageFlags> => ({
+		// Omitted unless true: the client defaults both to false, so an
+		// ordinary page stays an ordinary page on the wire.
+		...(shouldClearHistory ? { clearHistory: true } : {}),
+		...(shouldEncryptHistory ? { encryptHistory: true } : {}),
+		...(flashProvider ? { flash: await flashProvider() } : {}),
+	});
 
 	return {
 		share(data: Record<string, unknown>): void {
@@ -142,14 +158,9 @@ export function createPhotonContext(
 		flash(provider: () => unknown): void {
 			flashProvider = provider;
 		},
-		async resolvePageFlags(): Promise<PageFlags> {
-			return {
-				// Omitted unless true: the client defaults both to false, so an
-				// ordinary page stays an ordinary page on the wire.
-				...(shouldClearHistory ? { clearHistory: true } : {}),
-				...(shouldEncryptHistory ? { encryptHistory: true } : {}),
-				...(flashProvider ? { flash: await flashProvider() } : {}),
-			};
+		resolvePageFlags,
+		requestInfo(): PhotonRequestInfo {
+			return info;
 		},
 		location(url: string): void {
 			redirectTo = url;
@@ -172,15 +183,54 @@ export function createPhotonContext(
 		): Promise<RenderResult> {
 			const finalMeta = mergeMeta(accumulated, meta);
 			// Shared props are the base; per-call props win on key conflicts.
-			return renderer.render(
+			const pageProps = { ...shared, ...props };
+			const sharedKeys = Object.keys(shared);
+			if (!info.isPhotonRequest) {
+				return renderer.render(
+					component,
+					pageProps,
+					url,
+					finalMeta,
+					await resolvePageFlags(),
+					sharedKeys,
+					requestContext,
+				);
+			}
+			// A props request is answered from this one resolution, against the
+			// partial request: no SSR, no HTML document, and a resolver the
+			// reload did not ask for never runs.
+			const resolved = await resolveProps(pageProps, component, info.partial);
+			const result = renderer.renderProps(
 				component,
-				{ ...shared, ...props },
+				resolved.props,
 				url,
 				finalMeta,
-				await this.resolvePageFlags(),
-				Object.keys(shared),
-				requestContext,
+				{
+					...resolved.extras,
+					...(sharedKeys.length > 0 ? { sharedProps: sharedKeys } : {}),
+					...(await resolvePageFlags()),
+				},
 			);
+			stampResponse(requestContext, result.headers);
+			return result;
 		},
 	};
+}
+
+/**
+ * Put a props response's headers on the host response, as upstream sets
+ * `X-Inertia` itself: a handler that sends only the body still answers JSON,
+ * not a string the host would label `text/plain`.
+ */
+function stampResponse(
+	requestContext: SsrRequestContext | undefined,
+	headers: Readonly<Record<string, string>>,
+): void {
+	const res = Reflect.get(Object(requestContext), "response");
+	if (typeof res !== "object" || res === null) return;
+	const header = Reflect.get(res, "header");
+	if (typeof header !== "function") return;
+	for (const [name, value] of Object.entries(headers)) {
+		header.call(res, name, value);
+	}
 }

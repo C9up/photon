@@ -90,7 +90,7 @@ describe("photon > PhotonMiddleware", () => {
 		expect(res.body).toContain('"component":"Home"');
 	});
 
-	it("rewrites HTML response into JSON props when X-Photon=true is set", async () => {
+	it("renders the JSON props when X-Photon=true is set", async () => {
 		const mw = new PhotonMiddleware(baseConfig).middleware();
 		const { ctx, res } = makeCtx({
 			path: "/users",
@@ -101,7 +101,6 @@ describe("photon > PhotonMiddleware", () => {
 			const out = await ctx.photon?.render("Users", { count: 2 });
 			(ctx.response as { send: (b: string) => void }).send(out?.html ?? "");
 		});
-		// After mw, res.body must be JSON props (not the original HTML).
 		const parsed = JSON.parse(res.body ?? "{}");
 		expect(parsed).toMatchObject({
 			component: "Users",

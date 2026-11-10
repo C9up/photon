@@ -45,12 +45,11 @@ describe("photon > PhotonMiddleware > with Ream's Response", () => {
 		else process.env.NODE_ENV = orig;
 	});
 
-	it("answers an SPA navigation with the props as JSON", async () => {
+	it("answers an SPA navigation with the props as JSON, even when the handler sends only the body", async () => {
 		const mw = new PhotonMiddleware(config).middleware();
 		const { ctx, response } = makeCtx({ "x-photon": "true" });
 		await mw(ctx, async () => {
 			const out = await ctx.photon?.render("Users", { count: 2 });
-			response.header("content-type", "text/html; charset=utf-8");
 			response.send(out?.html ?? "");
 		});
 		expect(response.getStatus()).toBe(200);
@@ -67,7 +66,6 @@ describe("photon > PhotonMiddleware > with Ream's Response", () => {
 		await mw(ctx, async () => {
 			ctx.photon?.share({ auth: { user: "ada" } });
 			const out = await ctx.photon?.render("Users", { count: 2 });
-			response.header("content-type", "text/html; charset=utf-8");
 			response.send(out?.html ?? "");
 		});
 		const page = JSON.parse(response.getBody());
@@ -87,7 +85,6 @@ describe("photon > PhotonMiddleware > with Ream's Response", () => {
 			response.vary("Accept-Encoding");
 			await mw(ctx, async () => {
 				const out = await ctx.photon?.render("Users", {});
-				response.header("content-type", "text/html; charset=utf-8");
 				response.send(out?.html ?? "");
 			});
 			expect(response.getHeader("vary")).toBe("Accept-Encoding, X-Photon");

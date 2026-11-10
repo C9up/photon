@@ -57,6 +57,7 @@ export {
 	type SpecialProp,
 	scroll,
 } from "./props.js";
+export type { PhotonRequestInfo } from "./requestInfo.js";
 // SEO / `<head>` management (Story 44.2)
 export type {
 	CustomMetaTag,
