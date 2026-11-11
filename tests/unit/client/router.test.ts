@@ -1698,6 +1698,50 @@ describe("photon/client > router — visits other than GET", () => {
 		expect(onSuccess).toHaveBeenCalledTimes(1);
 	});
 
+	it("never sends the XSRF token to another origin", async () => {
+		vi.spyOn(Document.prototype, "cookie", "get").mockReturnValue(
+			"XSRF-TOKEN=abc%3Ddef",
+		);
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+			pageResponse({ component: "Orders", url: "/orders/1", props: {} }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		await bootHydratedReactPage();
+		const { hrefSetter, restore } = spyOnHrefSetter();
+		try {
+			for (const url of [
+				"https://other.example/orders",
+				"//other.example/orders",
+			]) {
+				fetchMock.mockClear();
+				hrefSetter.mockClear();
+				await router.post(url, { item: "tea" });
+				// No request of the router's own carries the token off the origin:
+				// the browser is sent there instead, without the header.
+				for (const [, init] of fetchMock.mock.calls) {
+					expect(sentHeader(init, "X-XSRF-TOKEN")).toBeUndefined();
+				}
+				expect(
+					fetchMock.mock.calls.some(([sent]) =>
+						String(sent).includes("other.example"),
+					),
+				).toBe(false);
+				expect(hrefSetter).toHaveBeenCalledWith(
+					new URL(url, location.href).href,
+				);
+			}
+		} finally {
+			restore();
+		}
+
+		// The same origin spelled absolutely still carries it.
+		fetchMock.mockClear();
+		await router.post(`${location.origin}/orders`, { item: "tea" });
+		expect(sentHeader(fetchMock.mock.calls[0]?.[1], "X-XSRF-TOKEN")).toBe(
+			"abc=def",
+		);
+	});
+
 	it("sends multipart as soon as there is a file, nested keys bracketed", async () => {
 		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
 			pageResponse({ component: "Profile", url: "/profile", props: {} }),
