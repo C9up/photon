@@ -122,6 +122,36 @@ describe("photon > page url", () => {
 		expect(JSON.parse(written.body ?? "{}").url).toBe("/users?page=3");
 	});
 
+	it("appends the raw query a duck-typed host keeps beside path()", async () => {
+		const viaParsedUrl = await serve(
+			{ "x-photon": "true" },
+			{
+				path: () => "/users",
+				parsedUrl: () => ({ pathname: "/users", query: "page=2&q=bob" }),
+			},
+		);
+		expect(JSON.parse(viaParsedUrl.body ?? "{}").url).toBe(
+			"/users?page=2&q=bob",
+		);
+
+		const viaQueryString = await serve(
+			{ "x-photon": "true", "x-photon-version": "stale" },
+			{ path: () => "/users", query: "page=2&q=bob" },
+			false,
+		);
+		expect(viaQueryString.headers["x-photon-location"]).toBe(
+			"/users?page=2&q=bob",
+		);
+	});
+
+	it("ignores a parsed query object, which carries no raw query", async () => {
+		const written = await serve(
+			{ "x-photon": "true" },
+			{ path: () => "/users", query: { page: "2" } },
+		);
+		expect(JSON.parse(written.body ?? "{}").url).toBe("/users");
+	});
+
 	it("falls back to path() for a host with nothing else", async () => {
 		const written = await serve({ "x-photon": "true" }, { path: () => "/p" });
 		expect(JSON.parse(written.body ?? "{}").url).toBe("/p");

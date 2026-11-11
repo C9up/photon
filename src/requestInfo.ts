@@ -63,7 +63,7 @@ export function readRequestMethod(ctx: unknown): string {
  * The page's `url` is what the client writes to the address bar, and the
  * stale-version reload goes back to it: without the query, `/users?page=2`
  * became `/users` on every visit. A Node-style `url` string already carries
- * the query; `path()` is the last resort.
+ * the query; otherwise `path()` plus the raw query the host keeps beside it.
  */
 export function readRequestUrl(ctx: unknown): string {
 	const req = Reflect.get(Object(ctx), "request");
@@ -75,14 +75,40 @@ export function readRequestUrl(ctx: unknown): string {
 	} else if (typeof url === "string" && url !== "") {
 		return url;
 	}
-	const pathname = Reflect.get(req, "path");
-	if (typeof pathname === "function") {
-		const value = pathname.call(req);
-		if (typeof value === "string" && value !== "") return value;
-	} else if (typeof pathname === "string" && pathname !== "") {
-		return pathname;
+	const pathname = readStringMember(req, "path");
+	if (pathname === undefined) return "/";
+	const query = readRawQuery(req);
+	return query === "" ? pathname : `${pathname}?${query}`;
+}
+
+/** A non-empty string a host exposes as a property or a no-arg method. */
+function readStringMember(target: object, name: string): string | undefined {
+	const member = Reflect.get(target, name);
+	const value = typeof member === "function" ? member.call(target) : member;
+	return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * The raw query string of a duck-typed request, without its `?`: a
+ * `parsedUrl` (method or object) carrying `query`/`search`, or a `query`
+ * string. A parsed query object is not a raw query and is ignored.
+ */
+function readRawQuery(req: object): string {
+	const parsedMember = Reflect.get(req, "parsedUrl");
+	const parsed =
+		typeof parsedMember === "function" ? parsedMember.call(req) : parsedMember;
+	if (typeof parsed === "object" && parsed !== null) {
+		const query = readStringMember(parsed, "query");
+		if (query !== undefined) return stripQuestionMark(query);
+		const search = readStringMember(parsed, "search");
+		if (search !== undefined) return stripQuestionMark(search);
 	}
-	return "/";
+	const query = readStringMember(req, "query");
+	return query === undefined ? "" : stripQuestionMark(query);
+}
+
+function stripQuestionMark(query: string): string {
+	return query.startsWith("?") ? query.slice(1) : query;
 }
 
 /** A comma-separated header list, trimmed and without empties. */
