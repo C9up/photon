@@ -9,7 +9,11 @@ import "./augmentations.js";
 export { defineConfig } from "./config.js";
 export { configure } from "./configure.js";
 export { PhotonError } from "./errors.js";
-export type { PhotonContext } from "./PhotonContext.js";
+export type {
+	PhotonContext,
+	SharedData,
+	SharedDataProvider,
+} from "./PhotonContext.js";
 export { createPhotonContext } from "./PhotonContext.js";
 export {
 	getValidationErrors,

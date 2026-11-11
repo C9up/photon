@@ -19,6 +19,12 @@ import {
 } from "./requestInfo.js";
 import { type MetaTags, mergeMeta } from "./seo/Meta.js";
 
+/** Props shared with every page of a request. */
+export type SharedData = Record<string, unknown>;
+
+/** Shared props computed when the page is built. */
+export type SharedDataProvider = () => SharedData | Promise<SharedData>;
+
 export interface PhotonContext {
 	/**
 	 * Render a page component with props.
@@ -34,12 +40,19 @@ export interface PhotonContext {
 		meta?: MetaTags,
 	): Promise<RenderResult>;
 	/**
-	 * Share props across every `render()` of this request — AdonisJS Inertia's
-	 * `inertia.share({...})`. Use for cross-cutting data (auth user, flash, locale)
-	 * so handlers don't repeat it. Multiple calls shallow-merge (last wins per key);
-	 * a per-call `render(props)` key overrides a shared one.
+	 * Share props across every `render()` of this request. Use for
+	 * cross-cutting data (auth user, locale) so handlers don't repeat it.
+	 *
+	 * Takes the props, or a provider returning them (sync or async). A
+	 * provider runs only when a page is built, after the handler: a global
+	 * middleware sharing the user costs nothing on a request that renders no
+	 * page, and sees what the handler changed. Registrations shallow-merge in
+	 * order (last wins per key); a per-call `render(props)` key overrides a
+	 * shared one.
+	 *
+	 *   ctx.photon.share(() => ({ user: ctx.auth.user }))
 	 */
-	share(data: Record<string, unknown>): void;
+	share(data: SharedData | SharedDataProvider): void;
 	/**
 	 * Send the client to another URL, including one outside the app
 	 * (AdonisJS Inertia's `inertia.location`).
@@ -92,8 +105,6 @@ export interface PhotonContext {
 	getVersion(): string;
 	/** Whether `component` is server-rendered under the current config. */
 	ssrEnabled(component: string): Promise<boolean>;
-	/** Internal: the keys `share()` has contributed so far. */
-	sharedKeys(): string[];
 	/** Internal: the response flags accumulated for this request. */
 	resolvePageFlags(): Promise<PageFlags>;
 	/** Internal: the pending `location()` target, cleared once read. */
@@ -125,7 +136,7 @@ export function createPhotonContext(
 	requestContext?: SsrRequestContext,
 ): PhotonContext {
 	let accumulated: MetaTags | undefined;
-	let shared: Record<string, unknown> = {};
+	const sharedEntries: (SharedData | SharedDataProvider)[] = [];
 	let shouldClearHistory = false;
 	let shouldEncryptHistory = renderer.encryptsHistory();
 	let flashProvider: (() => unknown) | undefined;
@@ -155,17 +166,14 @@ export function createPhotonContext(
 	});
 
 	return {
-		share(data: Record<string, unknown>): void {
-			shared = { ...shared, ...data };
+		share(data: SharedData | SharedDataProvider): void {
+			sharedEntries.push(data);
 		},
 		getVersion(): string {
 			return renderer.getVersion();
 		},
 		ssrEnabled(component: string): Promise<boolean> {
 			return renderer.ssrEnabled(component, requestContext);
-		},
-		sharedKeys(): string[] {
-			return Object.keys(shared);
 		},
 		clearHistory(): void {
 			shouldClearHistory = true;
@@ -204,6 +212,7 @@ export function createPhotonContext(
 		): Promise<RenderResult> {
 			const finalMeta = mergeMeta(accumulated, meta);
 			// Shared props are the base; per-call props win on key conflicts.
+			const shared = await resolveShared(sharedEntries);
 			const pageProps = { ...shared, ...props };
 			const sharedKeys = Object.keys(shared);
 			if (!info.isPhotonRequest) {
@@ -236,6 +245,18 @@ export function createPhotonContext(
 			return result;
 		},
 	};
+}
+
+/** Run the shared providers together and merge them in registration order. */
+async function resolveShared(
+	entries: readonly (SharedData | SharedDataProvider)[],
+): Promise<SharedData> {
+	const states = await Promise.all(
+		entries.map((entry) => (typeof entry === "function" ? entry() : entry)),
+	);
+	let merged: SharedData = {};
+	for (const state of states) merged = { ...merged, ...state };
+	return merged;
 }
 
 /** The session key a pending `clearHistory()` waits under across a redirect. */

@@ -14,7 +14,7 @@
 // augmentation below has a module to attach to, without importing a value or
 // creating a runtime dependency. ream is already a peer.
 import type {} from "@c9up/ream";
-import type { PhotonContext } from "./PhotonContext.js";
+import type { PhotonContext, SharedData } from "./PhotonContext.js";
 
 /**
  * Teach ream's `HttpContext` about `ctx.photon`, so a route handler can
@@ -258,6 +258,22 @@ export class PhotonMiddleware {
 	#renderer: PhotonRenderer;
 	#bootPromise?: Promise<void>;
 
+	/**
+	 * Props shared with every page of the request, defined by a subclass.
+	 * Resolved when a page is built, after the handler ran.
+	 *
+	 *   class AppPhotonMiddleware extends PhotonMiddleware {
+	 *     share(ctx) { return { user: ctx.auth?.user } }
+	 *   }
+	 */
+	share?(ctx: PhotonMiddlewareContext): SharedData | Promise<SharedData>;
+
+	/**
+	 * The one-shot bag sent beside the props as `flash`, defined by a
+	 * subclass. A handler's own `ctx.photon.flash()` replaces it.
+	 */
+	flash?(ctx: PhotonMiddlewareContext): unknown;
+
 	constructor(config: PhotonConfig) {
 		this.#renderer = new PhotonRenderer(config);
 	}
@@ -293,8 +309,14 @@ export class PhotonMiddleware {
 
 			// Validation errors are shared with every page: a form component reads
 			// `errors.email` unconditionally, so the key has to be there. A
-			// controller's own `errors` prop wins.
-			photon.share({ errors: getValidationErrors(ctx) });
+			// controller's own `errors` prop wins, and so does the share() hook's.
+			photon.share(() => ({ errors: getValidationErrors(ctx) }));
+			// The application's hooks, registered as providers: they run when a
+			// page is built, never on a request that renders none.
+			const share = this.share;
+			if (share !== undefined) photon.share(() => share.call(this, ctx));
+			const flash = this.flash;
+			if (flash !== undefined) photon.flash(() => flash.call(this, ctx));
 
 			const res = ctx.response as Record<string, unknown> | undefined;
 			if (res) varyOnPhoton(res);
