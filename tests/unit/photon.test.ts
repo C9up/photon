@@ -171,11 +171,15 @@ describe("photon > PhotonMiddleware", () => {
 			},
 		};
 
-		const middleware = mw.middleware();
-		await middleware(ctx, async () => {
-			// After middleware runs, ctx.photon should be available
-			expect(ctx.photon).toBeDefined();
+		let rendered: string | undefined;
+		await mw.middleware()(ctx, async () => {
+			const photon = defined(ctx.photon);
+			// A plain browser load: the context answers with a page.
+			expect(photon.requestInfo().isPhotonRequest).toBe(false);
+			rendered = (await photon.render("Dashboard", {})).html;
 		});
+		expect(rendered).toMatch(/^<!DOCTYPE html>/);
+		expect(rendered).toContain('"url":"/dashboard"');
 	});
 
 	it("detects X-Photon header", async () => {
@@ -184,17 +188,42 @@ describe("photon > PhotonMiddleware", () => {
 			entryClient: "app.tsx",
 		});
 
+		const sent: Record<string, string> = {};
+		const response = {
+			status: () => response,
+			header(name: string, value: string) {
+				sent[name.toLowerCase()] = value;
+				return response;
+			},
+			send() {},
+			getHeader: (name: string) => sent[name.toLowerCase()],
+		};
 		const ctx: PhotonMiddlewareContext = {
 			request: {
 				method: () => "GET",
 				path: () => "/",
 				header: (name) => (name === "x-photon" ? "true" : undefined),
 			},
+			response,
 		};
 
-		const middleware = mw.middleware();
-		await middleware(ctx, async () => {});
-		// Middleware completes without error
+		let result: { html: string; headers: Record<string, string> } | undefined;
+		await mw.middleware()(ctx, async () => {
+			const photon = defined(ctx.photon);
+			expect(photon.requestInfo().isPhotonRequest).toBe(true);
+			result = await photon.render("Home", { greeting: "hi" });
+		});
+		// The props request is answered with the page object as JSON, not HTML.
+		const answered = defined(result);
+		expect(answered.headers["content-type"]).toBe("application/json");
+		expect(answered.headers["x-photon"]).toBe("true");
+		expect(JSON.parse(answered.html)).toMatchObject({
+			component: "Home",
+			props: { greeting: "hi" },
+		});
+		// Stamped on the host response, and caches told the answer varies.
+		expect(sent["x-photon"]).toBe("true");
+		expect(sent.vary).toBe("X-Photon");
 	});
 
 	it("returns JSON props when X-Photon is true and handler rendered HTML", async () => {
