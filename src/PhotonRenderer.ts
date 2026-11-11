@@ -593,15 +593,20 @@ export class PhotonRenderer {
 		// values a partial reload would, and an `optional()` resolver must stay
 		// uncalled here as well.
 		const resolved = await resolveProps(props, component);
+		// The server component renders from what the client will hydrate from:
+		// the props as JSON, `toJSON()` applied. Live values would hand it a
+		// model's hidden columns and a Date the client then sees as a string.
+		const serialisedProps = toJson(resolved.props);
 		const pageData: PageProps = {
 			component,
-			props: resolved.props,
+			props: isJsonObject(serialisedProps) ? serialisedProps : {},
 			url,
 			framework: this.#config.framework,
 			version: this.getVersion(),
 			...(sharedKeys.length > 0 ? { sharedProps: [...sharedKeys] } : {}),
 			...resolved.extras,
 			...flags,
+			...(flags.flash === undefined ? {} : { flash: toJson(flags.flash) }),
 		};
 
 		// SPA-mode: return JSON props for client-side navigation
@@ -1124,4 +1129,14 @@ function pickRender(
 		return (page) => render(page);
 	}
 	return undefined;
+}
+
+/** A value as the client receives it: through JSON, `toJSON()` and all. */
+function toJson(value: unknown): unknown {
+	const text = JSON.stringify(value);
+	return text === undefined ? undefined : JSON.parse(text);
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

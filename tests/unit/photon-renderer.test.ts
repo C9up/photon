@@ -158,6 +158,44 @@ describe("photon > PhotonRenderer > render() with an SSR module", () => {
 		);
 	});
 
+	it("hands the SSR render the serialised props the client hydrates from", async () => {
+		class User {
+			name = "Ada";
+			password = "secret-hash";
+			createdAt = new Date("2026-01-02T03:04:05.000Z");
+			toJSON() {
+				return { name: this.name, createdAt: this.createdAt };
+			}
+		}
+		const r = new PhotonRenderer(baseConfig);
+		let seen: PageProps | undefined;
+		attachSsrModule(r, (page) => {
+			seen = page;
+			return "<h1>ok</h1>";
+		});
+		const { html } = await r.render(
+			"Profile",
+			{ user: new User(), at: new Date("2026-03-04T00:00:00.000Z") },
+			"/",
+			undefined,
+			{ flash: { when: new Date("2026-05-06T00:00:00.000Z") } },
+		);
+		const user = seen?.props.user;
+		// The model's hidden column never reaches the server component, and a
+		// Date is the ISO string the client will see too.
+		expect(user).toEqual({
+			name: "Ada",
+			createdAt: "2026-01-02T03:04:05.000Z",
+		});
+		expect(user).not.toBeInstanceOf(User);
+		expect(seen?.props.at).toBe("2026-03-04T00:00:00.000Z");
+		expect(seen?.flash).toEqual({ when: "2026-05-06T00:00:00.000Z" });
+		const embedded = /<script[^>]*id="photon-data">([^<]*)<\/script>/.exec(
+			html,
+		);
+		expect(JSON.parse(embedded?.[1] ?? "{}")).toEqual(seen);
+	});
+
 	it("puts the head tags of a { head, body } render into <head>", async () => {
 		const r = new PhotonRenderer(baseConfig);
 		attachSsrModule(r, () => ({
