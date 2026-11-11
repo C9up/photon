@@ -255,10 +255,36 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 
 	it("refuses an assetsUrl that names another host by its path", async () => {
 		await writeBuild("{}");
-		const err = await expectPhotonError(
-			new PhotonRenderer({ ...baseConfig, assetsUrl: "//evil.example" }).boot(),
-			"protocol-relative assetsUrl",
-		);
-		expect(err.code).toBe("E_PHOTON_INVALID_CONFIG");
+		// Each would put a foreign or script URL into <script src>: another
+		// host spelled as a path (a browser reads `/\` and a tab inside `//`
+		// as `//`), a non-http scheme, or a bare host the page resolves as a
+		// relative path today and a typo for a host tomorrow.
+		for (const assetsUrl of [
+			"//evil.example",
+			"/\\evil.example",
+			"/\t/evil.example",
+			"javascript:alert(1)",
+			"data:text/html,x",
+			"evil.example/app/",
+			"ftp://cdn.example/app",
+		]) {
+			const err = await expectPhotonError(
+				new PhotonRenderer({ ...baseConfig, assetsUrl }).boot(),
+				`assetsUrl ${JSON.stringify(assetsUrl)}`,
+			);
+			expect(err.code).toBe("E_PHOTON_INVALID_CONFIG");
+		}
+	});
+
+	it("accepts a root-relative path and an http(s) URL as assetsUrl", async () => {
+		await writeBuild("{}");
+		for (const assetsUrl of [
+			"/build",
+			"/",
+			"https://cdn.example/app",
+			"http://cdn.example",
+		]) {
+			await new PhotonRenderer({ ...baseConfig, assetsUrl }).boot();
+		}
 	});
 });

@@ -916,16 +916,36 @@ function isWithin(parent: string, child: string): boolean {
 }
 
 /** A root-relative path (not `//host`) or an absolute http(s) URL. */
+/**
+ * A root-relative path or an http(s) URL, judged as a browser parses it: a
+ * path that a browser reads as another host (`//host`, `/\host`, a tab or
+ * newline inside the slashes) is refused like the protocol-relative URL it
+ * becomes.
+ */
 function isAssetsUrl(url: string): boolean {
+	if (url === "") return true;
+	if (url.startsWith("/")) {
+		return parsesTo(url, ASSETS_URL_PROBE)?.host === ASSETS_URL_PROBE_HOST;
+	}
+	const parsed = parsesTo(url);
 	return (
-		(url.startsWith("/") && !url.startsWith("//")) ||
-		url.startsWith("http://") ||
-		url.startsWith("https://") ||
-		url === ""
+		parsed !== undefined &&
+		(parsed.protocol === "http:" || parsed.protocol === "https:") &&
+		parsed.host !== ""
 	);
 }
 
-/** The top level of a Vite manifest: an object of entries, not a list. */
+const ASSETS_URL_PROBE_HOST = "origin.invalid";
+const ASSETS_URL_PROBE = `http://${ASSETS_URL_PROBE_HOST}`;
+
+function parsesTo(url: string, base?: string): URL | undefined {
+	try {
+		return new URL(url, base);
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * A manifest object. Its values are read field by field where they are used
  * (`readManifestEntry`, `stringsOf`): a hand-edited or truncated manifest
