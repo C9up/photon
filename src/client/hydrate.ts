@@ -22,10 +22,10 @@
 
 import type { MetaTags } from "../seo/Meta.js";
 import type { PhotonAdapter } from "./adapters/types.js";
-import { bootPage, SUPPORTED_FRAMEWORKS } from "./boot.js";
+import { bootPage } from "./boot.js";
 import { PhotonClientError } from "./errors.js";
 import type { OncePropMeta } from "./mergeProps.js";
-import type { ResolveComponent } from "./router.js";
+import { type ResolveComponent, SUPPORTED_FRAMEWORKS } from "./router.js";
 
 /** Frameworks supported by the bundled adapters. Mirrors `PhotonConfig.framework`. */
 export type ClientFramework = "react" | "vue" | "svelte";

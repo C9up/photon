@@ -71,9 +71,12 @@ export function getRouteMeta(
 	const value: unknown = Reflect.getOwnMetadata(META_KEY, target, propertyKey);
 	if (value === undefined || value === null) return undefined;
 	if (typeof value === "function") {
-		return value as (
-			ctx: unknown,
-		) => MetaTags | undefined | Promise<MetaTags | undefined>;
+		const factory = value;
+		// What the factory returns is checked, not assumed.
+		return async (ctx: unknown) => {
+			const result: unknown = await Reflect.apply(factory, undefined, [ctx]);
+			return isMetaTagsShape(result) ? result : undefined;
+		};
 	}
 	if (isMetaTagsShape(value)) return value;
 	return undefined;

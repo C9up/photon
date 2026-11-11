@@ -16,7 +16,7 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import type { MetaTags } from "../seo/Meta.js";
+import { readMetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { applyMetaToDom } from "./applyMeta.js";
 import { isPhotonState, readHistoryState, toHistoryState } from "./history.js";
@@ -43,11 +43,20 @@ export interface BootRouterOptions {
 	page?: PhotonPageData;
 }
 
-const SUPPORTED_FRAMEWORKS: readonly ClientFramework[] = [
+export const SUPPORTED_FRAMEWORKS: readonly ClientFramework[] = [
 	"react",
 	"vue",
 	"svelte",
 ];
+
+/** Whether a page-data `framework` names one the client can mount. */
+export function isClientFramework(value: unknown): value is ClientFramework {
+	return SUPPORTED_FRAMEWORKS.some((framework) => framework === value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 const PHOTON_HEADER = "x-photon";
 const VERSION_HEADER = "x-photon-version";
@@ -1383,34 +1392,16 @@ function reloadFromServer(): void {
 }
 
 function parsePageData(value: unknown): PhotonPageData | null {
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		return null;
-	const obj = value as Record<string, unknown>;
-	if (typeof obj.component !== "string" || obj.component.length === 0)
-		return null;
-	if (typeof obj.url !== "string") return null;
-	if (
-		typeof obj.framework !== "string" ||
-		!SUPPORTED_FRAMEWORKS.includes(obj.framework as ClientFramework)
-	) {
-		return null;
-	}
-	if (
-		typeof obj.props !== "object" ||
-		obj.props === null ||
-		Array.isArray(obj.props)
-	)
-		return null;
-	const out: PhotonPageData = {
-		component: obj.component,
-		props: obj.props as Record<string, unknown>,
-		url: obj.url,
-		framework: obj.framework as ClientFramework,
-	};
-	const meta = obj.meta;
-	if (typeof meta === "object" && meta !== null && !Array.isArray(meta)) {
-		out.meta = meta as MetaTags;
-	}
+	if (!isRecord(value)) return null;
+	const obj = value;
+	const { component, url, framework, props } = obj;
+	if (typeof component !== "string" || component.length === 0) return null;
+	if (typeof url !== "string") return null;
+	if (!isClientFramework(framework)) return null;
+	if (!isRecord(props)) return null;
+	const out: PhotonPageData = { component, props, url, framework };
+	const meta = readMetaTags(obj.meta);
+	if (meta !== undefined) out.meta = meta;
 	if (typeof obj.version === "string") out.version = obj.version;
 	if (obj.clearHistory === true) out.clearHistory = true;
 	if (obj.encryptHistory === true) out.encryptHistory = true;

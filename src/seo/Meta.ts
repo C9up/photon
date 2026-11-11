@@ -369,3 +369,98 @@ function dedupeCustom(entries: CustomMetaTag[]): CustomMetaTag[] {
 	}
 	return [...seen.values()];
 }
+
+const META_STRING_FIELDS = [
+	"title",
+	"description",
+	"canonical",
+	"robots",
+] as const;
+const OG_FIELDS = [
+	"title",
+	"description",
+	"image",
+	"imageAlt",
+	"url",
+	"type",
+	"siteName",
+	"locale",
+] as const;
+const TWITTER_STRING_FIELDS = [
+	"site",
+	"creator",
+	"title",
+	"description",
+	"image",
+	"imageAlt",
+] as const;
+const TWITTER_CARDS = [
+	"summary",
+	"summary_large_image",
+	"app",
+	"player",
+] as const;
+const CUSTOM_FIELDS = [
+	"name",
+	"property",
+	"httpEquiv",
+	"charset",
+	"content",
+] as const;
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isTwitterCard(value: unknown): value is TwitterTags["card"] {
+	return TWITTER_CARDS.some((card) => card === value);
+}
+
+/** The string fields of `source` named in `fields`; anything else dropped. */
+function pickStrings<K extends string>(
+	source: Record<string, unknown>,
+	fields: readonly K[],
+): Partial<Record<K, string>> {
+	const out: Partial<Record<K, string>> = {};
+	for (const field of fields) {
+		const value = source[field];
+		if (typeof value === "string") out[field] = value;
+	}
+	return out;
+}
+
+/**
+ * Read `MetaTags` out of a payload the client received: each field kept only
+ * when it has the type the head code relies on, so a malformed payload
+ * cannot make it call `join` on a string or set an attribute to an object.
+ */
+export function readMetaTags(value: unknown): MetaTags | undefined {
+	if (!isObjectRecord(value)) return undefined;
+	const meta: MetaTags = pickStrings(value, META_STRING_FIELDS);
+	const { keywords, og, twitter, custom, jsonLd } = value;
+	if (Array.isArray(keywords)) {
+		meta.keywords = keywords.filter(
+			(keyword): keyword is string => typeof keyword === "string",
+		);
+	}
+	if (isObjectRecord(og)) meta.og = pickStrings(og, OG_FIELDS);
+	if (isObjectRecord(twitter)) {
+		const tags: TwitterTags = pickStrings(twitter, TWITTER_STRING_FIELDS);
+		if (isTwitterCard(twitter.card)) tags.card = twitter.card;
+		meta.twitter = tags;
+	}
+	if (Array.isArray(custom)) {
+		meta.custom = custom
+			.filter(isObjectRecord)
+			.map((entry) => pickStrings(entry, CUSTOM_FIELDS));
+	}
+	if (
+		typeof jsonLd === "object" &&
+		jsonLd !== null &&
+		(!Array.isArray(jsonLd) ||
+			jsonLd.every((node) => typeof node === "object" && node !== null))
+	) {
+		meta.jsonLd = jsonLd;
+	}
+	return meta;
+}

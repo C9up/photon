@@ -10,19 +10,21 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import type { MetaTags } from "../seo/Meta.js";
+import { readMetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { PhotonClientError } from "./errors.js";
 import { readHistoryState, toHistoryState } from "./history.js";
-import type { ClientFramework, PhotonPageData } from "./hydrate.js";
+import type { PhotonPageData } from "./hydrate.js";
 import {
 	announceFlash,
 	bootRouter,
+	isClientFramework,
 	primeCurrentPage,
 	type ResolveComponent,
 	readDeferredProps,
 	readOnceProps,
 	readScrollProps,
+	SUPPORTED_FRAMEWORKS,
 } from "./router.js";
 
 /**
@@ -35,12 +37,6 @@ import {
 const hydratedTargets = new WeakSet<Element>();
 
 const PHOTON_DATA_ELEMENT_ID = "photon-data";
-
-export const SUPPORTED_FRAMEWORKS: readonly ClientFramework[] = [
-	"react",
-	"vue",
-	"svelte",
-];
 
 export interface BootPageOptions {
 	/** CSS selector for the mount target. */
@@ -177,7 +173,7 @@ function validatePageData(value: unknown): PhotonPageData {
 		);
 	}
 
-	const { component, props, url, framework } = value as Record<string, unknown>;
+	const { component, props, url, framework } = value;
 
 	if (typeof component !== "string" || component.length === 0) {
 		throw new PhotonClientError(
@@ -204,7 +200,7 @@ function validatePageData(value: unknown): PhotonPageData {
 			{ hint: `Got: ${typeof framework}.` },
 		);
 	}
-	if (!SUPPORTED_FRAMEWORKS.includes(framework as ClientFramework)) {
+	if (!isClientFramework(framework)) {
 		// String but not one of the supported values — escalate to UNSUPPORTED_FRAMEWORK
 		// so consumers can distinguish "malformed payload" (BAD_DATA) from
 		// "well-formed but framework not bundled" (UNSUPPORTED_FRAMEWORK).
@@ -217,33 +213,27 @@ function validatePageData(value: unknown): PhotonPageData {
 
 	const out: PhotonPageData = {
 		component,
-		props: props as Record<string, unknown>,
+		props,
 		url,
-		framework: framework as ClientFramework,
+		framework,
 	};
 
-	const meta = (value as Record<string, unknown>).meta;
-	if (isPlainObject(meta)) {
-		out.meta = meta as MetaTags;
-	}
-	const version = (value as Record<string, unknown>).version;
+	const meta = readMetaTags(value.meta);
+	if (meta !== undefined) out.meta = meta;
+	const version = value.version;
 	if (typeof version === "string") out.version = version;
-	const { clearHistory, encryptHistory } = value as Record<string, unknown>;
+	const { clearHistory, encryptHistory } = value;
 	if (clearHistory === true) out.clearHistory = true;
 	if (encryptHistory === true) out.encryptHistory = true;
-	const deferredProps = readDeferredProps(
-		(value as Record<string, unknown>).deferredProps,
-	);
+	const deferredProps = readDeferredProps(value.deferredProps);
 	if (deferredProps !== undefined) out.deferredProps = deferredProps;
-	const onceProps = readOnceProps((value as Record<string, unknown>).onceProps);
+	const onceProps = readOnceProps(value.onceProps);
 	if (onceProps !== undefined) out.onceProps = onceProps;
-	const flash = (value as Record<string, unknown>).flash;
+	const flash = value.flash;
 	if (typeof flash === "object" && flash !== null) out.flash = flash;
-	const scrollProps = readScrollProps(
-		(value as Record<string, unknown>).scrollProps,
-	);
+	const scrollProps = readScrollProps(value.scrollProps);
 	if (scrollProps !== undefined) out.scrollProps = scrollProps;
-	const rescued = (value as Record<string, unknown>).rescuedProps;
+	const rescued = value.rescuedProps;
 	if (Array.isArray(rescued) && rescued.every((p) => typeof p === "string")) {
 		out.rescuedProps = rescued;
 	}

@@ -224,7 +224,7 @@ export interface SsrModule {
 export class PhotonRenderer {
 	#config: PhotonConfig;
 	#ssrModule?: SsrModule;
-	#manifest?: Record<string, ViteManifestEntry | string[]>;
+	#manifest?: Record<string, unknown>;
 	/** Memoised asset fingerprint — the manifest does not change at runtime. */
 	#cachedVersion?: string;
 	#isDev: boolean;
@@ -788,8 +788,7 @@ export class PhotonRenderer {
 		// Backward-compatible fallback for older manifest shapes.
 		const css = Object.entries(this.#manifest)
 			.filter(([key]) => key.endsWith(".css"))
-			.filter(([, v]) => Array.isArray(v))
-			.flatMap(([, files]) => files as string[])
+			.flatMap(([, files]) => (Array.isArray(files) ? stringsOf(files) : []))
 			.map((f) => `${base}/${f}`)
 			.filter((u) => isSafeUrl(u) && !u.includes(".."));
 
@@ -798,8 +797,7 @@ export class PhotonRenderer {
 				([key]) =>
 					key.endsWith(".js") || key.endsWith(".tsx") || key.endsWith(".vue"),
 			)
-			.filter(([, v]) => Array.isArray(v))
-			.flatMap(([, files]) => files as string[])
+			.flatMap(([, files]) => (Array.isArray(files) ? stringsOf(files) : []))
 			.map((f) => `${base}/${f}`)
 			.filter((u) => isSafeUrl(u) && !u.includes(".."));
 
@@ -928,9 +926,12 @@ function isAssetsUrl(url: string): boolean {
 }
 
 /** The top level of a Vite manifest: an object of entries, not a list. */
-function isManifest(
-	value: unknown,
-): value is Record<string, ViteManifestEntry | string[]> {
+/**
+ * A manifest object. Its values are read field by field where they are used
+ * (`readManifestEntry`, `stringsOf`): a hand-edited or truncated manifest
+ * must not put `[object Object]` into a script URL.
+ */
+function isManifest(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -990,7 +991,7 @@ async function loadSsrModule(
 /** True for an ESM "module/file not found" import failure (vs a module that threw). */
 function isModuleNotFound(err: unknown): boolean {
 	if (typeof err !== "object" || err === null) return false;
-	const code = (err as { code?: unknown }).code;
+	const code: unknown = Reflect.get(err, "code");
 	return code === "ERR_MODULE_NOT_FOUND" || code === "ENOENT";
 }
 
@@ -1007,20 +1008,40 @@ function normalizeManifestKey(key: string): string {
 }
 
 function resolveManifestEntry(
-	manifest: Record<string, ViteManifestEntry | string[]>,
+	manifest: Record<string, unknown>,
 	entryClient: string,
 ): ViteManifestEntry | undefined {
 	const normalized = normalizeManifestKey(entryClient);
 	for (const [key, value] of Object.entries(manifest)) {
-		if (normalizeManifestKey(key) === normalized && !Array.isArray(value)) {
-			return value;
-		}
+		if (normalizeManifestKey(key) !== normalized) continue;
+		const entry = readManifestEntry(value);
+		if (entry !== undefined) return entry;
 	}
 	return undefined;
 }
 
+/** A manifest entry, each field kept only when it holds what Vite writes. */
+function readManifestEntry(value: unknown): ViteManifestEntry | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return undefined;
+	}
+	const file: unknown = Reflect.get(value, "file");
+	const css: unknown = Reflect.get(value, "css");
+	const imports: unknown = Reflect.get(value, "imports");
+	return {
+		...(typeof file === "string" ? { file } : {}),
+		css: Array.isArray(css) ? stringsOf(css) : [],
+		imports: Array.isArray(imports) ? stringsOf(imports) : [],
+	};
+}
+
+/** The strings of a list, anything else in it dropped. */
+function stringsOf(list: readonly unknown[]): string[] {
+	return list.filter((item): item is string => typeof item === "string");
+}
+
 function collectManifestAssets(
-	manifest: Record<string, ViteManifestEntry | string[]>,
+	manifest: Record<string, unknown>,
 	entryClient: string,
 	type: "js" | "css",
 ): string[] {
@@ -1032,8 +1053,9 @@ function collectManifestAssets(
 			([k]) => normalizeManifestKey(k) === normalizeManifestKey(key),
 		);
 		if (!match) return;
-		const [actualKey, value] = match;
-		if (visited.has(actualKey) || Array.isArray(value)) return;
+		const [actualKey, raw] = match;
+		const value = readManifestEntry(raw);
+		if (visited.has(actualKey) || value === undefined) return;
 		visited.add(actualKey);
 
 		if (type === "js") {

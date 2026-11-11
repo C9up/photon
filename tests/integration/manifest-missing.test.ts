@@ -190,6 +190,43 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		);
 	});
 
+	it("skips manifest values that are not file names instead of linking them", async () => {
+		await writeBuild(
+			JSON.stringify({
+				"resources/app.tsx": {
+					file: { not: "a file" },
+					css: ["assets/app-3.css", 7],
+					imports: ["chunk", 3],
+					isEntry: true,
+				},
+				chunk: { file: "assets/chunk-3.js" },
+			}),
+		);
+		const r = new PhotonRenderer(baseConfig);
+		await r.boot();
+		const { html } = await r.render("Home", {}, "/");
+		expect(html).toContain('src="/build/assets/chunk-3.js"');
+		expect(html).toContain('href="/build/assets/app-3.css"');
+		expect(html).not.toContain("[object Object]");
+		expect(html).not.toContain('"/build/7"');
+		expect(html).not.toContain('"/build/3"');
+
+		// The older flat shape: lists of file names per key.
+		await writeBuild(
+			JSON.stringify({
+				"app.js": [{ not: "a file" }, "assets/app-4.js"],
+				"app.css": ["assets/app-4.css", 5],
+			}),
+		);
+		const flat = new PhotonRenderer(baseConfig);
+		await flat.boot();
+		const flatHtml = (await flat.render("Home", {}, "/")).html;
+		expect(flatHtml).toContain('src="/build/assets/app-4.js"');
+		expect(flatHtml).toContain('href="/build/assets/app-4.css"');
+		expect(flatHtml).not.toContain("[object Object]");
+		expect(flatHtml).not.toContain('"/build/5"');
+	});
+
 	it("loads a bundle whose render is the default export", async () => {
 		await writeBuild(
 			"{}",

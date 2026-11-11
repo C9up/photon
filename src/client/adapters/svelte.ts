@@ -107,7 +107,7 @@ export const svelteAdapter: PhotonAdapter = {
 		}
 
 		let instance: SvelteInstance | undefined = start(Component, {
-			target: target as Element,
+			target,
 			props,
 		});
 		// True after `unmount()` is called explicitly — protects `update()` from
@@ -124,7 +124,7 @@ export const svelteAdapter: PhotonAdapter = {
 				// `mount` (not `hydrate`) since the DOM has already been rendered once
 				// by the previous client-side instance — no SSR markup to take over.
 				instance = svelte.mount(NextComponent, {
-					target: target as Element,
+					target,
 					props: nextProps,
 				});
 			},

@@ -177,7 +177,7 @@ function reflashSession(ctx: unknown): void {
 const MUTATION_METHODS = new Set(["PUT", "PATCH", "DELETE"]);
 
 /** The status already set on the response, however the host exposes it. */
-function readStatus(res: Record<string, unknown>): number | undefined {
+function readStatus(res: object): number | undefined {
 	const getter = Reflect.get(res, "getStatus");
 	if (typeof getter === "function") {
 		const value = getter.call(res);
@@ -196,7 +196,7 @@ function readStatus(res: Record<string, unknown>): number | undefined {
  * (plain closures) hid it.
  */
 function writeResponse(
-	res: Record<string, unknown>,
+	res: object,
 	status: number,
 	headers: Record<string, string>,
 	body = "",
@@ -212,13 +212,13 @@ function writeResponse(
 		if (typeof send === "function") send.call(res, body);
 		return;
 	}
-	res.status = status;
+	Reflect.set(res, "status", status);
 	const existing = Reflect.get(res, "headers");
-	res.headers = {
+	Reflect.set(res, "headers", {
 		...(typeof existing === "object" && existing !== null ? existing : {}),
 		...headers,
-	};
-	res.body = body;
+	});
+	Reflect.set(res, "body", body);
 }
 
 /**
@@ -229,7 +229,7 @@ function writeResponse(
  * page, or the page to the client router. Every response, as upstream's
  * middleware does: whether a later handler renders is not known yet.
  */
-function varyOnPhoton(res: Record<string, unknown>): void {
+function varyOnPhoton(res: object): void {
 	const vary = Reflect.get(res, "vary");
 	if (typeof vary === "function") {
 		vary.call(res, "X-Photon");
@@ -248,10 +248,10 @@ function varyOnPhoton(res: Record<string, unknown>): void {
 		return;
 	}
 	const existing = Reflect.get(res, "headers");
-	res.headers = {
+	Reflect.set(res, "headers", {
 		...(typeof existing === "object" && existing !== null ? existing : {}),
 		vary: value,
-	};
+	});
 }
 
 export class PhotonMiddleware {
@@ -318,7 +318,7 @@ export class PhotonMiddleware {
 			const flash = this.flash;
 			if (flash !== undefined) photon.flash(() => flash.call(this, ctx));
 
-			const res = ctx.response as Record<string, unknown> | undefined;
+			const res: object | undefined = ctx.response;
 			if (res) varyOnPhoton(res);
 
 			await next();
@@ -356,13 +356,13 @@ export class PhotonMiddleware {
 				}
 				// A 302 after a mutation makes the browser repeat the method on
 				// the next hop; 303 forces the GET the client expects.
+				const setStatus = Reflect.get(res, "status");
 				if (
 					MUTATION_METHODS.has(info.method) &&
 					readStatus(res) === 302 &&
-					typeof res.status === "function"
+					typeof setStatus === "function"
 				) {
-					const setStatus = Reflect.get(res, "status");
-					if (typeof setStatus === "function") setStatus.call(res, 303);
+					setStatus.call(res, 303);
 				}
 			}
 		};
