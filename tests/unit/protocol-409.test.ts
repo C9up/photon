@@ -65,6 +65,23 @@ describe("photon > 409 protocol flows", () => {
 		expect(written.headers["x-photon-location"]).toBe("https://pay.example");
 	});
 
+	it("answers location() on a plain browser request with a 302 to the target", async () => {
+		const mw = new PhotonMiddleware(baseConfig);
+		const { ctx, written } = harness({});
+		await run(mw, ctx, async () => {
+			const photon = Reflect.get(Object(ctx), "photon");
+			Reflect.get(Object(photon), "location").call(
+				photon,
+				"https://sso.example/authorize",
+			);
+		});
+		// The first visit has no client router to read a 409: the browser
+		// follows the redirect itself, and the target is never dropped.
+		expect(written.status).toBe(302);
+		expect(written.headers.location).toBe("https://sso.example/authorize");
+		expect(written.headers["x-photon-location"]).toBeUndefined();
+	});
+
 	it("forces a reload when the client's asset version is stale", async () => {
 		const mw = new PhotonMiddleware(baseConfig);
 		const { ctx, written } = harness({

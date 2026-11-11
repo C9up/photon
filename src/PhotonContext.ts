@@ -47,7 +47,8 @@ export interface PhotonContext {
 	 * A normal 302 cannot work here: the SPA client would follow it with its
 	 * own fetch and receive HTML it cannot mount. The protocol answer is a 409
 	 * carrying the target, which the client turns into a real browser
-	 * navigation.
+	 * navigation. A plain browser load (no client router yet) gets a 302 to
+	 * the target instead.
 	 */
 	location(url: string): void;
 	/**

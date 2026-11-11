@@ -301,10 +301,20 @@ export class PhotonMiddleware {
 
 			await next();
 
+			// Read on every request, so a `location()` is never dropped.
+			const explicit = (ctx.photon ?? photon).takeLocation();
+
+			// NAMED DEVIATION: upstream answers `location()` with a 409 whatever
+			// the request. A plain browser load has no client router to read it
+			// and shows an empty error page; a 302 sends that browser on itself.
+			if (!info.isPhotonRequest && res && explicit !== undefined) {
+				writeResponse(res, 302, { location: explicit });
+				return;
+			}
+
 			// A 409 tells the SPA client to leave the fetch loop and navigate for
 			// real. Two things ask for it; there is no page to send in either case.
 			if (info.isPhotonRequest && res) {
-				const explicit = (ctx.photon ?? photon).takeLocation();
 				const version = this.#renderer.getVersion();
 				// An explicit `location()` wins; otherwise a stale asset version
 				// forces a hard reload of the SAME url so the client picks up the
