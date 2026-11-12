@@ -7,3 +7,5 @@ coverage/
 # vitest browser-mode artifacts
 .vitest-attachments/
 __screenshots__/
+# Workstream: the maintainer's local tracking, never published
+.workstream/
