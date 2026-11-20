@@ -10,7 +10,11 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PhotonError } from "./errors.js";
 import type { PhotonMiddlewareContext } from "./PhotonMiddleware.js";
-import { type PropsProtocolExtras, resolveProps } from "./props.js";
+import {
+	type PropsProtocolExtras,
+	type PropsRequest,
+	resolveProps,
+} from "./props.js";
 import { missingSecurityHeaders, resolveNonce } from "./requestSecurity.js";
 import { type MetaTags, mergeMeta, serializeMetaTags } from "./seo/Meta.js";
 
@@ -580,24 +584,35 @@ export class PhotonRenderer {
 		return true;
 	}
 
-	async render(
+	/**
+	 * Build the page object the client receives (upstream `page()`): the props
+	 * resolved against the partial request, when there is one, then serialized
+	 * — the server component renders from what the client will hydrate from,
+	 * `toJSON()` applied, never from live values that would hand it a model's
+	 * hidden columns and a Date the client then sees as a string.
+	 */
+	async buildPage(
 		component: string,
-		props: Record<string, unknown> = {},
+		props: Record<string, unknown>,
 		url: string,
-		meta?: MetaTags,
-		flags: PageFlags = {},
-		sharedKeys: readonly string[] = [],
-		requestContext?: SsrRequestContext,
-	): Promise<RenderResult> {
-		// Unwrap the prop helpers before SSR too: a first load must see the same
+		options: {
+			flags?: PageFlags | (() => Promise<PageFlags>);
+			sharedKeys?: readonly string[];
+			partial?: PropsRequest;
+			requestContext?: SsrRequestContext;
+		} = {},
+	): Promise<PageProps> {
+		// Unwrap the prop helpers on a first load too: it must see the same
 		// values a partial reload would, and an `optional()` resolver must stay
 		// uncalled here as well.
-		const resolved = await resolveProps(props, component);
-		// The server component renders from what the client will hydrate from:
-		// the props as JSON, `toJSON()` applied. Live values would hand it a
-		// model's hidden columns and a Date the client then sees as a string.
+		const resolved = await resolveProps(props, component, options.partial);
+		const flags =
+			typeof options.flags === "function"
+				? await options.flags()
+				: (options.flags ?? {});
+		const sharedKeys = options.sharedKeys ?? [];
 		const serialisedProps = toJson(resolved.props);
-		const pageData: PageProps = {
+		return {
 			component,
 			props: isJsonObject(serialisedProps) ? serialisedProps : {},
 			url,
@@ -608,16 +623,42 @@ export class PhotonRenderer {
 			...flags,
 			...(flags.flash === undefined ? {} : { flash: toJson(flags.flash) }),
 		};
+	}
 
-		// SPA-mode: return JSON props for client-side navigation
-		// (detected by X-Photon request header, set by the client-side router)
+	async render(
+		component: string,
+		props: Record<string, unknown> = {},
+		url: string,
+		meta?: MetaTags,
+		flags: PageFlags = {},
+		sharedKeys: readonly string[] = [],
+		requestContext?: SsrRequestContext,
+	): Promise<RenderResult> {
+		const page = await this.buildPage(component, props, url, {
+			flags,
+			sharedKeys,
+			requestContext,
+		});
+		return this.renderDocument(page, meta, requestContext);
+	}
 
-		// SSR mode: render full HTML
+	/**
+	 * Answer a first visit: server-render the page when SSR applies, then write
+	 * the HTML document.
+	 */
+	async renderDocument(
+		page: PageProps,
+		meta?: MetaTags,
+		requestContext?: SsrRequestContext,
+	): Promise<RenderResult> {
 		let ssr: { head: string[]; body: string } | undefined;
-		if (this.#ssrModule && (await this.ssrEnabled(component, requestContext))) {
+		if (
+			this.#ssrModule &&
+			(await this.ssrEnabled(page.component, requestContext))
+		) {
 			let output: unknown;
 			try {
-				output = await this.#ssrModule.render(pageData);
+				output = await this.#ssrModule.render(page);
 			} catch (err) {
 				// Photon's own failure (the entry cannot be loaded) keeps its code.
 				if (err instanceof PhotonError) throw err;
@@ -640,7 +681,7 @@ export class PhotonRenderer {
 			}
 		}
 
-		const pageDataJson = JSON.stringify(pageData);
+		const pageDataJson = JSON.stringify(page);
 		const assets = this.#getAssets();
 		// A policy that names a nonce blocks every script without it — with
 		// 'strict-dynamic', even the same-origin entry. Stamped on each tag.
@@ -682,6 +723,15 @@ export class PhotonRenderer {
 				}),
 			},
 		};
+	}
+
+	/**
+	 * Answer a props request (`X-Photon`) with the page object as JSON, the
+	 * request's `<head>` data beside it.
+	 */
+	renderPageObject(page: PageProps, meta?: MetaTags): RenderResult {
+		const { component, props, url, ...rest } = page;
+		return this.renderProps(component, props, url, meta, rest);
 	}
 
 	/**

@@ -7,11 +7,11 @@
 
 import type {
 	PageFlags,
+	PageProps,
 	PhotonRenderer,
 	RenderResult,
 	SsrRequestContext,
 } from "./PhotonRenderer.js";
-import { resolveProps } from "./props.js";
 import {
 	type PhotonRequestInfo,
 	readRequestInfo,
@@ -39,6 +39,13 @@ export interface PhotonContext {
 		props?: Record<string, unknown>,
 		meta?: MetaTags,
 	): Promise<RenderResult>;
+	/**
+	 * Build the page object `render()` would ship — props resolved against
+	 * this request (a partial reload included), shared keys, flags, version —
+	 * without producing a response (upstream `inertia.page()`). `render()` is
+	 * built on it.
+	 */
+	page(component: string, props?: Record<string, unknown>): Promise<PageProps>;
 	/**
 	 * Share props across every `render()` of this request. Use for
 	 * cross-cutting data (auth user, locale) so handlers don't repeat it.
@@ -165,6 +172,22 @@ export function createPhotonContext(
 		...(flashProvider ? { flash: await flashProvider() } : {}),
 	});
 
+	const page = async (
+		component: string,
+		props: Record<string, unknown> = {},
+	): Promise<PageProps> => {
+		// Shared props are the base; per-call props win on key conflicts.
+		const shared = await resolveShared(sharedEntries);
+		return renderer.buildPage(component, { ...shared, ...props }, url, {
+			// A props request resolves against the partial it asks for; a first
+			// visit gets the full set.
+			partial: info.isPhotonRequest ? info.partial : undefined,
+			sharedKeys: Object.keys(shared),
+			flags: resolvePageFlags,
+			requestContext,
+		});
+	};
+
 	return {
 		share(data: SharedData | SharedDataProvider): void {
 			sharedEntries.push(data);
@@ -205,42 +228,21 @@ export function createPhotonContext(
 		getAccumulatedMeta(): MetaTags | undefined {
 			return accumulated;
 		},
+		page,
 		async render(
 			component: string,
 			props: Record<string, unknown> = {},
 			meta?: MetaTags,
 		): Promise<RenderResult> {
 			const finalMeta = mergeMeta(accumulated, meta);
-			// Shared props are the base; per-call props win on key conflicts.
-			const shared = await resolveShared(sharedEntries);
-			const pageProps = { ...shared, ...props };
-			const sharedKeys = Object.keys(shared);
+			// One resolution, against the request: a props request is answered
+			// with the page object alone — no SSR, no HTML document — and a
+			// resolver the partial reload did not ask for never runs.
+			const built = await page(component, props);
 			if (!info.isPhotonRequest) {
-				return renderer.render(
-					component,
-					pageProps,
-					url,
-					finalMeta,
-					await resolvePageFlags(),
-					sharedKeys,
-					requestContext,
-				);
+				return renderer.renderDocument(built, finalMeta, requestContext);
 			}
-			// A props request is answered from this one resolution, against the
-			// partial request: no SSR, no HTML document, and a resolver the
-			// reload did not ask for never runs.
-			const resolved = await resolveProps(pageProps, component, info.partial);
-			const result = renderer.renderProps(
-				component,
-				resolved.props,
-				url,
-				finalMeta,
-				{
-					...resolved.extras,
-					...(sharedKeys.length > 0 ? { sharedProps: sharedKeys } : {}),
-					...(await resolvePageFlags()),
-				},
-			);
+			const result = renderer.renderPageObject(built, finalMeta);
 			stampResponse(requestContext, result.headers);
 			return result;
 		},
