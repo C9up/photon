@@ -25,6 +25,8 @@ export type {
 	PageProps,
 	PhotonConfig,
 	RenderResult,
+	RootViewData,
+	RootViewRenderer,
 	SsrConfig,
 	SsrRequestContext,
 } from "./PhotonRenderer.js";

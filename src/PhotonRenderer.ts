@@ -145,7 +145,41 @@ export interface PhotonConfig<Ctx = SsrRequestContext> {
 	 * application root falls back to the working directory, as before.
 	 */
 	appRoot?: string;
+	/**
+	 * The HTML document a first visit is answered with (upstream `rootView`).
+	 *
+	 * A template name, rendered by the host's view engine as
+	 * `ctx.view.render(name, data)` — or a function of the request returning
+	 * one, so the shell can change per request (a locale, a theme). For a host
+	 * with no view engine the function may instead return a
+	 * {@link RootViewRenderer} that writes the document itself. Either way the
+	 * template receives {@link RootViewData}: the page object (with `ssrHead` /
+	 * `ssrBody` when server-rendered), photon's ready-made markup, and the view
+	 * props passed to `render()`.
+	 *
+	 * Unset, photon writes its own minimal document.
+	 */
+	rootView?: string | ((ctx: Ctx | undefined) => string | RootViewRenderer);
 }
+
+/** What a root view is rendered with. */
+export interface RootViewData {
+	/** The view props passed to `ctx.photon.render()`. */
+	[viewProp: string]: unknown;
+	/** The page object, plus the server render's output when there is one. */
+	page: PageProps & { ssrHead?: string[]; ssrBody?: string };
+	/**
+	 * Photon's markup, ready to place unescaped: `head` holds the meta tags,
+	 * the SSR head and the stylesheets; `body` the `<div id="app">` mount, the
+	 * page-data script and the entry scripts, each carrying the request's CSP
+	 * nonce. A template that writes `head` in `<head>` and `body` in `<body>`
+	 * needs nothing else.
+	 */
+	photon: { head: string; body: string; nonce?: string };
+}
+
+/** Writes a root view without a view engine. */
+export type RootViewRenderer = (data: RootViewData) => string | Promise<string>;
 
 /**
  * The page object the client hydrates from.
@@ -636,23 +670,25 @@ export class PhotonRenderer {
 		flags: PageFlags = {},
 		sharedKeys: readonly string[] = [],
 		requestContext?: SsrRequestContext,
+		viewProps?: Record<string, unknown>,
 	): Promise<RenderResult> {
 		const page = await this.buildPage(component, props, url, {
 			flags,
 			sharedKeys,
 			requestContext,
 		});
-		return this.renderDocument(page, meta, requestContext);
+		return this.renderDocument(page, meta, requestContext, viewProps);
 	}
 
 	/**
 	 * Answer a first visit: server-render the page when SSR applies, then write
-	 * the HTML document.
+	 * the HTML document — through the configured root view, or photon's own.
 	 */
 	async renderDocument(
 		page: PageProps,
 		meta?: MetaTags,
 		requestContext?: SsrRequestContext,
+		viewProps: Record<string, unknown> = {},
 	): Promise<RenderResult> {
 		let ssr: { head: string[]; body: string } | undefined;
 		if (
@@ -696,19 +732,23 @@ export class PhotonRenderer {
 			nonce === undefined ? {} : { nonce },
 		);
 
-		const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  ${headTags ? `${headTags}\n  ` : ""}${ssr && ssr.head.length > 0 ? `${ssr.head.join("\n  ")}\n  ` : ""}${assets.css.map((href) => `<link rel="stylesheet" href="${escapeAttr(href)}">`).join("\n  ")}
-</head>
-<body>
-  <div id="app"${ssr ? ' data-server-rendered="true"' : ""}>${ssr?.body ?? ""}</div>
+		const head = `${headTags ? `${headTags}\n  ` : ""}${ssr && ssr.head.length > 0 ? `${ssr.head.join("\n  ")}\n  ` : ""}${assets.css.map((href) => `<link rel="stylesheet" href="${escapeAttr(href)}">`).join("\n  ")}`;
+		const body = `<div id="app"${ssr ? ' data-server-rendered="true"' : ""}>${ssr?.body ?? ""}</div>
   <script${nonceAttr} type="application/json" id="photon-data">${escapeScriptJson(pageDataJson)}</script>
-  ${assets.js.map((src) => `<script${nonceAttr} type="module" src="${escapeAttr(src)}"></script>`).join("\n  ")}
-</body>
-</html>`;
+  ${assets.js.map((src) => `<script${nonceAttr} type="module" src="${escapeAttr(src)}"></script>`).join("\n  ")}`;
+
+		const html = await this.#renderRootView(
+			{
+				...viewProps,
+				// After the view props, so a view prop named `page` or `photon`
+				// cannot replace the page object or photon's markup. Upstream
+				// spreads the view props last; letting a caller's value silently
+				// replace the page the template mounts is not worth matching.
+				page: ssr ? { ...page, ssrHead: ssr.head, ssrBody: ssr.body } : page,
+				photon: { head, body, ...(nonce === undefined ? {} : { nonce }) },
+			},
+			requestContext,
+		);
 
 		return {
 			html,
@@ -726,6 +766,34 @@ export class PhotonRenderer {
 				}),
 			},
 		};
+	}
+
+	/** The document, through the configured root view or photon's own. */
+	async #renderRootView(
+		data: RootViewData,
+		requestContext: SsrRequestContext | undefined,
+	): Promise<string> {
+		const rootView = this.#config.rootView;
+		if (rootView === undefined) return defaultRootView(data);
+		const chosen =
+			typeof rootView === "function" ? rootView(requestContext) : rootView;
+		if (typeof chosen === "function") return chosen(data);
+		const view = Reflect.get(Object(requestContext), "view");
+		const render =
+			typeof view === "object" && view !== null
+				? Reflect.get(view, "render")
+				: undefined;
+		if (typeof render !== "function") {
+			throw new PhotonError(
+				"E_PHOTON_INVALID_CONFIG",
+				`rootView names the template "${chosen}", but the request has no view engine to render it`,
+				{
+					hint: "Install a view engine that sets ctx.view (@c9up/inker does), or make rootView return a function that writes the document.",
+				},
+			);
+		}
+		const html: unknown = await Reflect.apply(render, view, [chosen, data]);
+		return String(html);
 	}
 
 	/**
@@ -1224,6 +1292,24 @@ function pickRender(
 		return (page) => render(page);
 	}
 	return undefined;
+}
+
+/**
+ * Photon's own document, when the application configures no root view: the
+ * minimum a page needs, the markup {@link RootViewData.photon} carries.
+ */
+function defaultRootView(data: RootViewData): string {
+	return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  ${data.photon.head}
+</head>
+<body>
+  ${data.photon.body}
+</body>
+</html>`;
 }
 
 /** A value as the client receives it: through JSON, `toJSON()` and all. */

@@ -33,11 +33,18 @@ export interface PhotonContext {
 	 *   ctx.photon.render('Dashboard', { user, stats })
 	 *   // or with a per-call meta override:
 	 *   ctx.photon.render('Dashboard', { user }, { title: 'Dashboard' })
+	 *   // view props for the root view (`rootView`), e.g. the document's lang:
+	 *   ctx.photon.render('Dashboard', { user }, undefined, { lang: 'fr' })
+	 *
+	 * NAMED DEVIATION from upstream's `render(page, pageProps, viewProps)`: the
+	 * third argument is photon's per-call `<head>` metadata, so the view props
+	 * come fourth.
 	 */
 	render(
 		component: string,
 		props?: Record<string, unknown>,
 		meta?: MetaTags,
+		viewProps?: Record<string, unknown>,
 	): Promise<RenderResult>;
 	/**
 	 * Build the page object `render()` would ship — props resolved against
@@ -233,6 +240,7 @@ export function createPhotonContext(
 			component: string,
 			props: Record<string, unknown> = {},
 			meta?: MetaTags,
+			viewProps?: Record<string, unknown>,
 		): Promise<RenderResult> {
 			const finalMeta = mergeMeta(accumulated, meta);
 			// One resolution, against the request: a props request is answered
@@ -240,7 +248,12 @@ export function createPhotonContext(
 			// resolver the partial reload did not ask for never runs.
 			const built = await page(component, props);
 			if (!info.isPhotonRequest) {
-				return renderer.renderDocument(built, finalMeta, requestContext);
+				return renderer.renderDocument(
+					built,
+					finalMeta,
+					requestContext,
+					viewProps,
+				);
 			}
 			const result = renderer.renderPageObject(built, finalMeta);
 			stampResponse(requestContext, result.headers);
