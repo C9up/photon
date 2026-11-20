@@ -16,6 +16,7 @@ import {
 	resolveProps,
 } from "./props.js";
 import { missingSecurityHeaders, resolveNonce } from "./requestSecurity.js";
+import { reportRescued } from "./rescue.js";
 import { type MetaTags, mergeMeta, serializeMetaTags } from "./seo/Meta.js";
 
 export type Framework = "react" | "vue" | "svelte";
@@ -589,7 +590,8 @@ export class PhotonRenderer {
 	 * resolved against the partial request, when there is one, then serialized
 	 * — the server component renders from what the client will hydrate from,
 	 * `toJSON()` applied, never from live values that would hand it a model's
-	 * hidden columns and a Date the client then sees as a string.
+	 * hidden columns and a Date the client then sees as a string. Rescued
+	 * deferred-prop errors are reported here, once per build.
 	 */
 	async buildPage(
 		component: string,
@@ -606,6 +608,7 @@ export class PhotonRenderer {
 		// values a partial reload would, and an `optional()` resolver must stay
 		// uncalled here as well.
 		const resolved = await resolveProps(props, component, options.partial);
+		reportRescued(resolved.rescuedErrors, options.requestContext);
 		const flags =
 			typeof options.flags === "function"
 				? await options.flags()

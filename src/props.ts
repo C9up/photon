@@ -524,6 +524,18 @@ export interface ResolvedProps {
 	readonly props: Record<string, unknown>;
 	/** Spread straight into the page payload; empty on an ordinary render. */
 	readonly extras: PropsProtocolExtras;
+	/**
+	 * What each rescued deferred prop threw. Never on the wire: it is reported
+	 * out of band (see `onRescue`), so a failing panel stays visible to the
+	 * operator while the page renders its fallback.
+	 */
+	readonly rescuedErrors: readonly RescuedError[];
+}
+
+/** A deferred prop's resolver threw under `rescue: true`. */
+export interface RescuedError {
+	readonly prop: string;
+	readonly error: unknown;
 }
 
 /**
@@ -573,6 +585,7 @@ export async function resolveProps(
 	const out: Record<string, unknown> = {};
 	const deferred: Record<string, string[]> = {};
 	const rescued: string[] = [];
+	const rescuedErrors: RescuedError[] = [];
 	const merged: string[] = [];
 	const deepMerged: string[] = [];
 	const prepended: string[] = [];
@@ -679,10 +692,12 @@ export async function resolveProps(
 			try {
 				out[key] = await raw.value();
 				return true;
-			} catch {
+			} catch (error) {
 				// `rescue` means one slow panel failing must not take the whole
-				// reload with it; the page renders its fallback instead.
+				// reload with it; the page renders its fallback instead. The error
+				// is kept for reporting, as upstream's `rescuedErrors`.
 				rescued.push(key);
+				rescuedErrors.push({ prop: key, error });
 				return false;
 			}
 		}
@@ -714,5 +729,6 @@ export async function resolveProps(
 			...(Object.keys(cached).length > 0 ? { onceProps: cached } : {}),
 			...(Object.keys(cursors).length > 0 ? { scrollProps: cursors } : {}),
 		},
+		rescuedErrors,
 	};
 }

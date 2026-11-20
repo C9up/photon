@@ -52,6 +52,7 @@ export {
 	optional,
 	type PropsProtocolExtras,
 	type PropsRequest,
+	type RescuedError,
 	type ResolvedProps,
 	resolveProps,
 	type ScrollCursor,
@@ -62,6 +63,7 @@ export {
 	scroll,
 } from "./props.js";
 export type { PhotonRequestInfo } from "./requestInfo.js";
+export { onRescue, type RescueListener } from "./rescue.js";
 // SEO / `<head>` management (Story 44.2)
 export type {
 	CustomMetaTag,
