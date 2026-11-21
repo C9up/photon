@@ -25,7 +25,11 @@ import type { PhotonAdapter } from "./adapters/types.js";
 import { bootPage } from "./boot.js";
 import { PhotonClientError } from "./errors.js";
 import type { OncePropMeta } from "./mergeProps.js";
-import { type ResolveComponent, SUPPORTED_FRAMEWORKS } from "./router.js";
+import {
+	isClientFramework,
+	type ResolveComponent,
+	SUPPORTED_FRAMEWORKS,
+} from "./router.js";
 
 /** Frameworks supported by the bundled adapters. Mirrors `PhotonConfig.framework`. */
 export type ClientFramework = "react" | "vue" | "svelte";
@@ -35,7 +39,12 @@ export interface PhotonPageData {
 	component: string;
 	props: Record<string, unknown>;
 	url: string;
-	framework: ClientFramework;
+	/**
+	 * The adapter that mounts the page: one photon bundles (`react`, `vue`,
+	 * `svelte`) for `hydrate()`, or any name an application's own `mount`
+	 * answers to through `bootPage()` (aurora's is `aurora`).
+	 */
+	framework: string;
 	/**
 	 * Server-resolved head metadata (`@Meta`, `ctx.photon.meta()`, and the
 	 * global `defaultMeta`, all merged). Present on SPA-nav payloads
@@ -130,6 +139,13 @@ export interface HydrateOptions {
 // biome-ignore lint/suspicious/noEmptyInterface: the application augments it (declaration merging); a type alias cannot be augmented.
 export interface PhotonRoutes {}
 
+export type { PhotonAdapterHandle } from "./adapters/types.js";
+/**
+ * Boot with an adapter of the application's own: photon's router drives the
+ * visits, `mount` puts the first page on screen and returns what each visit
+ * updates. `hydrate()` is this with one of photon's bundled adapters.
+ */
+export { type BootPageOptions, bootPage } from "./boot.js";
 export type { PhotonClientErrorCode } from "./errors.js";
 /** Re-export so consumers can `instanceof`-check without a second import. */
 export { PhotonClientError } from "./errors.js";
@@ -185,8 +201,8 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 	});
 }
 
-async function loadAdapter(framework: ClientFramework): Promise<PhotonAdapter> {
-	if (!SUPPORTED_FRAMEWORKS.includes(framework)) {
+async function loadAdapter(framework: string): Promise<PhotonAdapter> {
+	if (!isClientFramework(framework)) {
 		throw new PhotonClientError(
 			"E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
 			`Unsupported framework: ${framework}.`,

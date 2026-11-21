@@ -64,8 +64,21 @@ export {
 	type SpecialProp,
 	scroll,
 } from "./props.js";
-export type { PhotonRequestInfo } from "./requestInfo.js";
-export { onRescue, type RescueListener } from "./rescue.js";
+// The protocol's server half, for a renderer that writes its own document
+// (aurora answers its page visits with these).
+export {
+	buildPageObject,
+	finishVisit,
+	type PageObjectOptions,
+	varyOnPhoton,
+} from "./protocol.js";
+export {
+	type PhotonRequestInfo,
+	readRequestInfo,
+	readRequestUrl,
+	shouldReloadForAssetVersion,
+} from "./requestInfo.js";
+export { onRescue, type RescueListener, reportRescued } from "./rescue.js";
 // SEO / `<head>` management (Story 44.2)
 export type {
 	CustomMetaTag,

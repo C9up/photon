@@ -10,11 +10,8 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PhotonError } from "./errors.js";
 import type { PhotonMiddlewareContext } from "./PhotonMiddleware.js";
-import {
-	type PropsProtocolExtras,
-	type PropsRequest,
-	resolveProps,
-} from "./props.js";
+import type { PropsProtocolExtras, PropsRequest } from "./props.js";
+import { buildPageObject } from "./protocol.js";
 import { missingSecurityHeaders, resolveNonce } from "./requestSecurity.js";
 import { reportRescued } from "./rescue.js";
 import { type MetaTags, mergeMeta, serializeMetaTags } from "./seo/Meta.js";
@@ -208,12 +205,12 @@ export interface PageProps extends PropsProtocolExtras, PageFlags {
 	 */
 	sharedProps?: string[];
 	/**
-	 * Frontend framework that hydrates this page on the client.
-	 * Mirrors `PhotonConfig.framework`; embedded in the page-data block so
-	 * `@c9up/photon/client` can dispatch to the correct adapter without an
-	 * out-of-band config call.
+	 * The adapter that hydrates this page on the client. photon's own renderer
+	 * writes `PhotonConfig.framework`; another renderer speaking the protocol
+	 * names its own (aurora's is `aurora`), which its client mounts through
+	 * `bootPage()`.
 	 */
-	framework: Framework;
+	framework: string;
 }
 
 export interface RenderResult {
@@ -641,25 +638,22 @@ export class PhotonRenderer {
 		// Unwrap the prop helpers on a first load too: it must see the same
 		// values a partial reload would, and an `optional()` resolver must stay
 		// uncalled here as well.
-		const resolved = await resolveProps(props, component, options.partial);
-		reportRescued(resolved.rescuedErrors, options.requestContext);
 		const flags =
 			typeof options.flags === "function"
 				? await options.flags()
 				: (options.flags ?? {});
-		const sharedKeys = options.sharedKeys ?? [];
-		const serialisedProps = toJson(resolved.props);
-		return {
-			component,
-			props: isJsonObject(serialisedProps) ? serialisedProps : {},
+		const built = await buildPageObject(component, props, {
 			url,
-			framework: this.#config.framework,
 			version: this.getVersion(),
-			...(sharedKeys.length > 0 ? { sharedProps: [...sharedKeys] } : {}),
-			...resolved.extras,
-			...flags,
-			...(flags.flash === undefined ? {} : { flash: toJson(flags.flash) }),
-		};
+			framework: this.#config.framework,
+			...(options.partial === undefined ? {} : { partial: options.partial }),
+			...(options.sharedKeys === undefined
+				? {}
+				: { sharedKeys: options.sharedKeys }),
+			flags,
+		});
+		reportRescued(built.rescuedErrors, options.requestContext);
+		return built.page;
 	}
 
 	async render(
@@ -1310,14 +1304,4 @@ function defaultRootView(data: RootViewData): string {
   ${data.photon.body}
 </body>
 </html>`;
-}
-
-/** A value as the client receives it: through JSON, `toJSON()` and all. */
-function toJson(value: unknown): unknown {
-	const text = JSON.stringify(value);
-	return text === undefined ? undefined : JSON.parse(text);
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

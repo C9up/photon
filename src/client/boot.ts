@@ -18,13 +18,11 @@ import type { PhotonPageData } from "./hydrate.js";
 import {
 	announceFlash,
 	bootRouter,
-	isClientFramework,
 	primeCurrentPage,
 	type ResolveComponent,
 	readDeferredProps,
 	readOnceProps,
 	readScrollProps,
-	SUPPORTED_FRAMEWORKS,
 } from "./router.js";
 
 /**
@@ -200,16 +198,15 @@ function validatePageData(value: unknown): PhotonPageData {
 			{ hint: `Got: ${typeof framework}.` },
 		);
 	}
-	if (!isClientFramework(framework)) {
-		// String but not one of the supported values — escalate to UNSUPPORTED_FRAMEWORK
-		// so consumers can distinguish "malformed payload" (BAD_DATA) from
-		// "well-formed but framework not bundled" (UNSUPPORTED_FRAMEWORK).
+	if (framework.length === 0) {
 		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
-			`Unsupported framework: '${framework}'.`,
-			{ hint: `Supported: ${SUPPORTED_FRAMEWORKS.join(", ")}.` },
+			"E_PHOTON_HYDRATION_BAD_DATA",
+			"photon-data.framework must be a non-empty string.",
 		);
 	}
+	// Which adapter mounts it is the caller's business: `hydrate()` refuses a
+	// framework photon does not bundle (E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK),
+	// `bootPage()` with its own `mount` takes any.
 
 	const out: PhotonPageData = {
 		component,

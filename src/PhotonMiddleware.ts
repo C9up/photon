@@ -33,12 +33,8 @@ declare module "@c9up/ream" {
 import { createPhotonContext } from "./PhotonContext.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
-import {
-	readRequestHeader,
-	readRequestUrl,
-	shouldReloadForAssetVersion,
-} from "./requestInfo.js";
-import { readResponseHeader } from "./requestSecurity.js";
+import { finishVisit, varyOnPhoton } from "./protocol.js";
+import { readRequestHeader, readRequestUrl } from "./requestInfo.js";
 import { getRouteMeta, resolveMeta } from "./seo/MetaDecorator.js";
 
 /** The single surface these validation errors need of a session flash bag. */
@@ -165,95 +161,6 @@ async function seedRouteMeta(
  *   const photon = PhotonMiddleware({ framework: 'react', entryClient: '...', ssr: { enabled: true, entrypoint: '...' } })
  *   app.use(photon.middleware())
  */
-/** Keep the session's flash messages for one more request, when it has them. */
-function reflashSession(ctx: unknown): void {
-	const session = Reflect.get(Object(ctx), "session");
-	if (typeof session !== "object" || session === null) return;
-	const reflash = Reflect.get(session, "reflash");
-	if (typeof reflash === "function") reflash.call(session);
-}
-
-/** Methods whose redirect must become a 303 so the next hop is a GET. */
-const MUTATION_METHODS = new Set(["PUT", "PATCH", "DELETE"]);
-
-/** The status already set on the response, however the host exposes it. */
-function readStatus(res: object): number | undefined {
-	const getter = Reflect.get(res, "getStatus");
-	if (typeof getter === "function") {
-		const value = getter.call(res);
-		return typeof value === "number" ? value : undefined;
-	}
-	const direct = Reflect.get(res, "statusCode") ?? Reflect.get(res, "status");
-	return typeof direct === "number" ? direct : undefined;
-}
-
-/**
- * Write a response through whichever shape the host provides.
- *
- * Every method is called ON the response. Ream's keeps its state in private
- * fields, so a method read off it and called bare throws — which is what the
- * props response did, on every SPA navigation, while the mocks in the tests
- * (plain closures) hid it.
- */
-function writeResponse(
-	res: object,
-	status: number,
-	headers: Record<string, string>,
-	body = "",
-): void {
-	const setStatus = Reflect.get(res, "status");
-	if (typeof setStatus === "function") {
-		setStatus.call(res, status);
-		const header = Reflect.get(res, "header");
-		if (typeof header === "function") {
-			for (const [k, v] of Object.entries(headers)) header.call(res, k, v);
-		}
-		const send = Reflect.get(res, "send");
-		if (typeof send === "function") send.call(res, body);
-		return;
-	}
-	Reflect.set(res, "status", status);
-	const existing = Reflect.get(res, "headers");
-	Reflect.set(res, "headers", {
-		...(typeof existing === "object" && existing !== null ? existing : {}),
-		...headers,
-	});
-	Reflect.set(res, "body", body);
-}
-
-/**
- * Add X-Photon to the response's Vary header.
- *
- * The same URL answers with a page or with its props depending on X-Photon, so
- * a cache that ignores the header can hand the JSON to a browser loading the
- * page, or the page to the client router. Every response, as upstream's
- * middleware does: whether a later handler renders is not known yet.
- */
-function varyOnPhoton(res: object): void {
-	const vary = Reflect.get(res, "vary");
-	if (typeof vary === "function") {
-		vary.call(res, "X-Photon");
-		return;
-	}
-	const current = readResponseHeader(res, "vary");
-	const fields = (current ?? "")
-		.split(",")
-		.map((field) => field.trim())
-		.filter((field) => field.length > 0);
-	if (fields.some((field) => field.toLowerCase() === "x-photon")) return;
-	const value = [...fields, "X-Photon"].join(", ");
-	const header = Reflect.get(res, "header");
-	if (typeof header === "function") {
-		header.call(res, "vary", value);
-		return;
-	}
-	const existing = Reflect.get(res, "headers");
-	Reflect.set(res, "headers", {
-		...(typeof existing === "object" && existing !== null ? existing : {}),
-		vary: value,
-	});
-}
-
 export class PhotonMiddleware {
 	#renderer: PhotonRenderer;
 	#bootPromise?: Promise<void>;
@@ -325,45 +232,12 @@ export class PhotonMiddleware {
 
 			// Read on every request, so a `location()` is never dropped.
 			const explicit = (ctx.photon ?? photon).takeLocation();
-
-			// NAMED DEVIATION: upstream answers `location()` with a 409 whatever
-			// the request. A plain browser load has no client router to read it
-			// and shows an empty error page; a 302 sends that browser on itself.
-			if (!info.isPhotonRequest && res && explicit !== undefined) {
-				writeResponse(res, 302, { location: explicit });
-				return;
-			}
-
-			// A 409 tells the SPA client to leave the fetch loop and navigate for
-			// real. Two things ask for it; there is no page to send in either case.
-			if (info.isPhotonRequest && res) {
-				const version = this.#renderer.getVersion();
-				// An explicit `location()` wins; otherwise a stale asset version
-				// forces a hard reload of the SAME url so the client picks up the
-				// new bundles.
-				const stale =
-					explicit === undefined && shouldReloadForAssetVersion(info, version);
-				const target = explicit ?? (stale ? url : undefined);
-				// The flash messages this request consumed must survive the hard
-				// reload, or a "Saved" landing right after a deploy is never shown.
-				if (stale) reflashSession(ctx);
-				if (target !== undefined) {
-					writeResponse(res, 409, {
-						"x-photon-location": target,
-						"x-photon-version": version,
-					});
-					return;
-				}
-				// A 302 after a mutation makes the browser repeat the method on
-				// the next hop; 303 forces the GET the client expects.
-				const setStatus = Reflect.get(res, "status");
-				if (
-					MUTATION_METHODS.has(info.method) &&
-					readStatus(res) === 302 &&
-					typeof setStatus === "function"
-				) {
-					setStatus.call(res, 303);
-				}
+			if (res) {
+				finishVisit(ctx, res, info, {
+					url,
+					version: this.#renderer.getVersion(),
+					location: explicit,
+				});
 			}
 		};
 	}

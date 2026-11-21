@@ -1397,7 +1397,7 @@ function parsePageData(value: unknown): PhotonPageData | null {
 	const { component, url, framework, props } = obj;
 	if (typeof component !== "string" || component.length === 0) return null;
 	if (typeof url !== "string") return null;
-	if (!isClientFramework(framework)) return null;
+	if (typeof framework !== "string" || framework.length === 0) return null;
 	if (!isRecord(props)) return null;
 	const out: PhotonPageData = { component, props, url, framework };
 	const meta = readMetaTags(obj.meta);

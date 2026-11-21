@@ -37,6 +37,9 @@ const app = new Ignitor({ port: 3000 })
   shows without restarting the process. Vite is an **optional peer** — without
   it installed, dev falls back to the client-only shell.
 - SPA navigation via `X-Photon` header (JSON props only)
+- The protocol for another renderer: `buildPageObject`, `finishVisit`,
+  `readRequestInfo` on the server and `bootPage` with an adapter of its own on
+  the client (aurora's page visits use them)
 - React (≥18), Vue (≥3), Svelte (≥5) framework support
 - Page data safely escaped in HTML
 - Production build with manifest-based asset loading
