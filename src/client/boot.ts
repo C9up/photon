@@ -14,6 +14,7 @@ import { readMetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { PhotonClientError } from "./errors.js";
 import { readHistoryState, toHistoryState } from "./history.js";
+import { currentHost, installHost, type PhotonHost } from "./host.js";
 import type { PhotonPageData } from "./hydrate.js";
 import {
 	announceFlash,
@@ -23,6 +24,7 @@ import {
 	readDeferredProps,
 	readOnceProps,
 	readScrollProps,
+	requestPage,
 } from "./router.js";
 
 /**
@@ -37,15 +39,25 @@ const hydratedTargets = new WeakSet<Element>();
 const PHOTON_DATA_ELEMENT_ID = "photon-data";
 
 export interface BootPageOptions {
-	/** CSS selector for the mount target. */
-	target: string;
+	/** CSS selector for the mount target, in a browser. */
+	target?: string;
+	/**
+	 * Where the router runs, when not in a browser: an app's address, back
+	 * stack and requests (see `PhotonHost`).
+	 */
+	host?: PhotonHost;
+	/**
+	 * Fetch the first page from the server at `url`, as a visit would —
+	 * for a host with no server-rendered document to read it from.
+	 */
+	url?: string;
 	resolveComponent: ResolveComponent;
 	/**
 	 * Put the first page on screen, and hand back what the router updates on
 	 * every visit.
 	 */
 	mount(
-		target: Element,
+		target: Element | undefined,
 		Component: unknown,
 		page: PhotonPageData,
 	): Promise<PhotonAdapterHandle>;
@@ -60,13 +72,16 @@ export interface BootPageOptions {
  * returns without re-hydrating.
  */
 export async function bootPage(options: BootPageOptions): Promise<void> {
-	const targetSelector = options.target;
-
-	const pageData = readPageData();
-	const target = resolveTarget(targetSelector);
+	installHost(options.host);
+	const pageData =
+		options.url === undefined
+			? readPageData()
+			: validatePageData(await requestPage(options.url));
+	const target =
+		options.target === undefined ? undefined : resolveTarget(options.target);
 
 	// Idempotency guard — second call on a hydrated target is a no-op.
-	if (hydratedTargets.has(target)) {
+	if (target !== undefined && hydratedTargets.has(target)) {
 		console.warn(
 			"[photon] hydrate() called twice on the same target; ignoring. " +
 				"Did you import @c9up/photon/client from two places?",
@@ -77,8 +92,9 @@ export async function bootPage(options: BootPageOptions): Promise<void> {
 	// A reload of the tab keeps what the page remembered: the entry it
 	// overwrites belonged to this very page. Read before the key can be
 	// cleared below, and before the first render, which may restore it.
-	if (typeof history !== "undefined") {
-		const previous: unknown = await readHistoryState(history.state);
+	const platform = currentHost();
+	if (platform !== undefined) {
+		const previous: unknown = await readHistoryState(platform.state());
 		const remembered = rememberedStateOf(previous, pageData);
 		if (remembered !== undefined) pageData.rememberedState = remembered;
 	}
@@ -91,21 +107,18 @@ export async function bootPage(options: BootPageOptions): Promise<void> {
 
 	const handle = await options.mount(target, Component, pageData);
 
-	hydratedTargets.add(target);
+	if (target !== undefined) hydratedTargets.add(target);
 
 	// Replace the initial history entry so back/forward have a valid state to
 	// restore. Use `pageData.url` rather than `location.href` so the state stays
 	// consistent with what the SSR captured.
-	if (
-		typeof history !== "undefined" &&
-		typeof history.replaceState === "function"
-	) {
+	if (platform !== undefined) {
 		// Through `toHistoryState`, so a first page that asks for encryption is
 		// never stored in the clear — and a login page reached after logout,
 		// carrying `clearHistory`, drops the key before anything else is stored.
 		const state = await toHistoryState(pageData);
 		try {
-			history.replaceState(state, "", pageData.url);
+			platform.replace(state, pageData.url);
 		} catch {
 			// Some test environments (or very old browsers) restrict replaceState.
 			// Hydration still succeeds; only SPA-nav back/forward will fall back to

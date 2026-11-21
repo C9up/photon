@@ -27,6 +27,7 @@
  * Browser-only — strict no `node:` imports.
  */
 
+import { currentHost } from "./host.js";
 import type { PhotonPageData } from "./hydrate.js";
 
 const KEY_STORAGE = "photon:history-key";
@@ -61,7 +62,11 @@ export async function toHistoryState(
 	// The flash was news once; stored, the back button would replay it.
 	const stored: PhotonPageData = { ...page };
 	delete stored.flash;
-	if (stored.encryptHistory !== true) return { photonData: stored };
+	// A host whose history never leaves memory (an app's back stack) has
+	// nothing to protect it from: encryption guards what a browser keeps.
+	if (stored.encryptHistory !== true || currentHost()?.memoryHistory === true) {
+		return { photonData: stored };
+	}
 	const subtle = subtleCrypto();
 	if (subtle === undefined) return { photonWithheld: true };
 	try {

@@ -40,6 +40,11 @@ const app = new Ignitor({ port: 3000 })
 - The protocol for another renderer: `buildPageObject`, `finishVisit`,
   `readRequestInfo` on the server and `bootPage` with an adapter of its own on
   the client (aurora's page visits use them)
+- Off the browser: `bootPage({ host, url })` runs the same router on another
+  platform's address, history and requests (`PhotonHost` — an app on a phone,
+  see orbit's server-driven pages); `@c9up/photon/client/core` is the router
+  without the bundled React / Vue / Svelte adapters, for a bundler that
+  follows every `import()`
 - React (≥18), Vue (≥3), Svelte (≥5) framework support
 - Page data safely escaped in HTML
 - Production build with manifest-based asset loading

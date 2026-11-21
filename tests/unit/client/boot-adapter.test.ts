@@ -44,7 +44,7 @@ describe("photon/client > bootPage with an application's adapter", () => {
 			target: "#aurora-root",
 			resolveComponent: async (name) => ({ default: `module:${name}` }),
 			mount: async (target, Component, data) => {
-				mounted.push([target.id, Component, data.framework, data.props]);
+				mounted.push([target?.id, Component, data.framework, data.props]);
 				return handle;
 			},
 		});

@@ -149,6 +149,8 @@ export { type BootPageOptions, bootPage } from "./boot.js";
 export type { PhotonClientErrorCode } from "./errors.js";
 /** Re-export so consumers can `instanceof`-check without a second import. */
 export { PhotonClientError } from "./errors.js";
+/** Where the router runs: the browser by default, an app's host through `bootPage({ host })`. */
+export { browserHost, type PhotonEvent, type PhotonHost } from "./host.js";
 export {
 	getScrollableParent,
 	type InfiniteScrollData,
@@ -194,6 +196,12 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 		onHydrated: options.onHydrated,
 		mount: async (target, Component, page) => {
 			const adapter = await loadAdapter(page.framework);
+			if (target === undefined) {
+				throw new PhotonClientError(
+					"E_PHOTON_HYDRATION_NO_TARGET",
+					"hydrate() mounts into a DOM node; it was given none.",
+				);
+			}
 			return adapter.hydrate(target, Component, page.props, {
 				svelteRoot: options.svelteRoot,
 			});

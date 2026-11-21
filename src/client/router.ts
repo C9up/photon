@@ -20,6 +20,7 @@ import { readMetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { applyMetaToDom } from "./applyMeta.js";
 import { isPhotonState, readHistoryState, toHistoryState } from "./history.js";
+import { currentHost, type PhotonEvent, type PhotonHost } from "./host.js";
 import type {
 	ClientFramework,
 	PhotonPageData,
@@ -36,7 +37,8 @@ import { type RouteTarget, resolveTarget } from "./routes.js";
 export type ResolveComponent = (name: string) => Promise<{ default: unknown }>;
 
 export interface BootRouterOptions {
-	target: Element;
+	/** The element pages render into, in a browser; an app's host has none. */
+	target?: Element;
 	adapter: PhotonAdapterHandle;
 	resolveComponent: ResolveComponent;
 	/** The page being hydrated: its version, and the deferred groups it owes. */
@@ -163,9 +165,8 @@ const STATE_SIZE_WARN_THRESHOLD = 100_000;
  * options slot without re-attaching listeners.
  */
 export function bootRouter(options: BootRouterOptions): void {
-	if (typeof document === "undefined" || typeof window === "undefined") {
-		return;
-	}
+	const platform = currentHost();
+	if (platform === undefined) return;
 
 	activeOptions = options;
 	currentVersion = options.page?.version;
@@ -175,19 +176,35 @@ export function bootRouter(options: BootRouterOptions): void {
 	if (listenersInstalled) return;
 	listenersInstalled = true;
 
-	document.addEventListener("click", (event) => {
-		if (!activeOptions) return;
-		void handleClick(event, activeOptions);
+	platform.listen({
+		click: (event) => {
+			// A host without a DOM (an app on a phone) has no MouseEvent.
+			if (typeof MouseEvent === "undefined") return;
+			if (!activeOptions || !(event instanceof MouseEvent)) return;
+			void handleClick(event, activeOptions);
+		},
+		restore: (state) => {
+			if (!activeOptions) return;
+			void handlePopState(state, activeOptions);
+		},
+		resume: (state) => {
+			void handlePageShow(state);
+		},
 	});
+}
 
-	window.addEventListener("popstate", (event) => {
-		if (!activeOptions) return;
-		void handlePopState(event, activeOptions);
-	});
+/** The host the router runs on (bootRouter returned early without one). */
+function host(): PhotonHost {
+	const platform = currentHost();
+	if (platform === undefined) {
+		throw new Error("[photon] the client router has no host to run on");
+	}
+	return platform;
+}
 
-	window.addEventListener("pageshow", (event) => {
-		void handlePageShow(event);
-	});
+/** The origin of the current address. */
+function currentOrigin(): string {
+	return new URL(host().href()).origin;
 }
 
 async function handleClick(
@@ -230,8 +247,7 @@ function findAnchor(target: EventTarget | null): HTMLAnchorElement | null {
 
 function isInterceptableUrl(url: URL, anchor: HTMLAnchorElement): boolean {
 	if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-	if (typeof location !== "undefined" && url.origin !== location.origin)
-		return false;
+	if (url.origin !== currentOrigin()) return false;
 
 	const target = anchor.getAttribute("target");
 	if (target && target !== "" && target !== "_self") return false;
@@ -253,13 +269,8 @@ function resolveUrl(href: string): URL | null {
 		// Use `document.baseURI` when present so relative anchors honor a
 		// `<base href>` element (sub-path apps with a configured base). Fall
 		// back to `location.href` for tests that run without a document.
-		const base =
-			typeof document !== "undefined" && typeof document.baseURI === "string"
-				? document.baseURI
-				: typeof location !== "undefined"
-					? location.href
-					: "http://localhost/";
-		return new URL(href, base);
+		const platform = currentHost();
+		return new URL(href, platform?.baseUri() ?? "http://localhost/");
 	} catch {
 		return null;
 	}
@@ -273,10 +284,11 @@ function resolveUrl(href: string): URL | null {
  * non-http(s) protocols.
  */
 function isSafeNavigationUrl(url: string): boolean {
-	if (typeof location === "undefined") return true; // SSR / non-browser; trust it
+	const platform = currentHost();
+	if (platform === undefined) return true; // SSR; trust it
 	try {
-		const resolved = new URL(url, location.href);
-		if (resolved.origin !== location.origin) return false;
+		const resolved = new URL(url, platform.href());
+		if (resolved.origin !== currentOrigin()) return false;
 		if (resolved.protocol !== "http:" && resolved.protocol !== "https:")
 			return false;
 		return true;
@@ -304,6 +316,25 @@ async function navigate(
 		announceVisit("finish", visit);
 		visitOptions.onFinish?.({ url: targetPath, completed });
 	}
+}
+
+/**
+ * The page object at `url`, asked for as a visit asks — what a host with no
+ * document boots its first page from (an app on a phone).
+ */
+export async function requestPage(url: string): Promise<unknown> {
+	const response = await host().fetch(url, {
+		method: "GET",
+		headers: { ...exceptOnceHeader(), [PHOTON_HEADER]: "true" },
+		credentials: "same-origin",
+	});
+	const type = response.headers.get("content-type") ?? "";
+	if (!response.ok || !type.toLowerCase().includes("application/json")) {
+		throw new Error(
+			`[photon] the first page at ${url} answered HTTP ${response.status} (${type || "no content type"}), not a page object`,
+		);
+	}
+	return response.json();
 }
 
 /** A navigation's request and swap; true once the new page is on screen. */
@@ -334,7 +365,7 @@ async function fetchAndApply(
 	try {
 		visitOptions.onStart?.({ url: targetPath });
 		visitOptions.onCancelToken?.({ cancel: () => controller.abort() });
-		response = await fetch(targetPath, {
+		response = await host().fetch(targetPath, {
 			signal: controller.signal,
 			method: method.toUpperCase(),
 			...(body !== undefined ? { body } : {}),
@@ -515,29 +546,19 @@ async function applyPageData(
 		console.warn("[photon] applyMetaToDom threw; head may be stale.", err);
 	}
 
-	if (
-		!fromHistory &&
-		typeof history !== "undefined" &&
-		typeof history.pushState === "function"
-	) {
+	if (!fromHistory) {
 		warnOnLargeState(pageData);
 		// If the URL hasn't changed, replace the history entry rather than
 		// stack a duplicate. Repeated clicks on the same link otherwise inflate
 		// history with redundant entries (back-button UX degrades).
-		const sameUrl =
-			replace ||
-			(typeof location !== "undefined" &&
-				resolvedSameUrl(pageData.url, location.href));
+		const sameUrl = replace || resolvedSameUrl(pageData.url, host().href());
 		// Encrypted when the page asks for it — which takes a turn of the event
 		// loop, so a newer navigation may have pushed its own entry meanwhile.
 		const state = await toHistoryState(pageData);
 		if (expectedSeq !== undefined && expectedSeq !== navigationSeq) return;
 		try {
-			if (sameUrl && typeof history.replaceState === "function") {
-				history.replaceState(state, "", pageData.url);
-			} else {
-				history.pushState(state, "", pageData.url);
-			}
+			if (sameUrl) host().replace(state, pageData.url);
+			else host().push(state, pageData.url);
 		} catch (err) {
 			// Same-origin pushState should never throw under normal use; log and continue.
 			console.error(
@@ -713,19 +734,15 @@ function toFormData(data: Record<string, unknown>): FormData {
  * what Ream's CSRF middleware reads. Never to another origin.
  */
 function xsrfHeader(url: string): Record<string, string> {
-	if (typeof document === "undefined") return {};
+	const platform = currentHost();
+	if (platform === undefined) return {};
 	try {
-		if (new URL(url, location.href).origin !== location.origin) return {};
+		if (new URL(url, platform.href()).origin !== currentOrigin()) return {};
 	} catch {
 		return {};
 	}
-	for (const part of document.cookie.split(";")) {
-		const [name, ...rest] = part.trim().split("=");
-		if (name === "XSRF-TOKEN") {
-			return { "X-XSRF-TOKEN": decodeURIComponent(rest.join("=")) };
-		}
-	}
-	return {};
+	const token = platform.cookie("XSRF-TOKEN");
+	return token === undefined ? {} : { "X-XSRF-TOKEN": token };
 }
 
 /**
@@ -798,7 +815,7 @@ async function applyPartial(
 
 	let response: Response;
 	try {
-		response = await fetch(url, {
+		response = await host().fetch(url, {
 			headers: {
 				...request.headers,
 				...exceptOnceHeader(),
@@ -908,7 +925,7 @@ async function applyPartial(
 	const state = await toHistoryState(next);
 	if (stillCurrent() && currentPage === next) {
 		try {
-			history.replaceState(state, "", next.url);
+			host().replace(state, next.url);
 		} catch {
 			// Restricted history: the props are on screen, only the cache is stale.
 		}
@@ -928,10 +945,7 @@ async function applyPartial(
  * `@inertiajs/core` fires as `inertia:success`, same `detail: { page }`.
  */
 function announceSuccess(page: PhotonPageData): void {
-	if (typeof document === "undefined") return;
-	document.dispatchEvent(
-		new CustomEvent("photon:success", { detail: { page } }),
-	);
+	announce("success", { page });
 }
 
 /** A visit as the router events describe it. */
@@ -958,19 +972,36 @@ export interface RouterEvents {
 	flash: { flash: object };
 }
 
+/** Who listens through `router.on`, per event. */
+const listeners: {
+	[K in keyof RouterEvents]: Set<(event: PhotonEvent<RouterEvents[K]>) => void>;
+} = {
+	error: new Set(),
+	start: new Set(),
+	finish: new Set(),
+	success: new Set(),
+	flash: new Set(),
+};
+
+/**
+ * Tell `router.on` listeners, and the platform: a browser dispatches
+ * `photon:<type>` on `document`, as `inertia:<type>`, for code that listens there.
+ */
+function announce<K extends keyof RouterEvents>(
+	type: K,
+	detail: RouterEvents[K],
+): void {
+	for (const listener of [...listeners[type]]) listener({ detail });
+	currentHost()?.emit(type, detail);
+}
+
 /** `photon:error` on `document`, as `inertia:error` — a visit came back with errors. */
 function announceErrors(errors: Record<string, unknown>): void {
-	if (typeof document === "undefined") return;
-	document.dispatchEvent(
-		new CustomEvent("photon:error", { detail: { errors } }),
-	);
+	announce("error", { errors });
 }
 
 function announceVisit(type: "start" | "finish", visit: Visit): void {
-	if (typeof document === "undefined") return;
-	document.dispatchEvent(
-		new CustomEvent(`photon:${type}`, { detail: { visit } }),
-	);
+	announce(type, { visit });
 }
 
 function describeVisit(
@@ -994,11 +1025,11 @@ let rememberQueue: Promise<void> = Promise.resolve();
 function rewriteHistoryEntry(): void {
 	rememberQueue = rememberQueue.then(async () => {
 		const page = currentPage;
-		if (page === undefined || typeof history === "undefined") return;
+		if (page === undefined || currentHost() === undefined) return;
 		const state = await toHistoryState(page);
 		if (currentPage !== page) return;
 		try {
-			history.replaceState(state, "", page.url);
+			host().replace(state, page.url);
 		} catch {
 			// Restricted history: the state lives on in memory only.
 		}
@@ -1040,12 +1071,9 @@ export async function reloadCurrentPage(
  * not announce it again.
  */
 export function announceFlash(flash: unknown): void {
-	if (typeof document === "undefined") return;
 	if (typeof flash !== "object" || flash === null) return;
 	if (Object.keys(flash).length === 0) return;
-	document.dispatchEvent(
-		new CustomEvent("photon:flash", { detail: { flash } }),
-	);
+	announce("flash", { flash });
 }
 
 /**
@@ -1156,8 +1184,7 @@ export const router = {
 		if (
 			activeOptions === undefined ||
 			resolved === null ||
-			typeof location === "undefined" ||
-			resolved.origin !== location.origin ||
+			resolved.origin !== currentOrigin() ||
 			(resolved.protocol !== "http:" && resolved.protocol !== "https:")
 		) {
 			if (resolved !== null && isHttpUrl(resolved.href)) {
@@ -1267,14 +1294,14 @@ export const router = {
 	 */
 	on<K extends keyof RouterEvents>(
 		type: K,
-		callback: (event: CustomEvent<RouterEvents[K]>) => void,
+		callback: (event: PhotonEvent<RouterEvents[K]>) => void,
 	): () => void {
-		if (typeof document === "undefined") return () => {};
-		const listener = (event: Event): void => {
-			if (event instanceof CustomEvent) callback(event);
+		const set: Set<(event: PhotonEvent<RouterEvents[K]>) => void> =
+			listeners[type];
+		set.add(callback);
+		return () => {
+			set.delete(callback);
 		};
-		document.addEventListener(`photon:${type}`, listener);
-		return () => document.removeEventListener(`photon:${type}`, listener);
 	},
 
 	/**
@@ -1341,11 +1368,11 @@ function warnOnLargeState(pageData: PhotonPageData): void {
 }
 
 async function handlePopState(
-	event: PopStateEvent,
+	historyState: unknown,
 	options: BootRouterOptions,
 ): Promise<void> {
 	const ownSeq = ++navigationSeq;
-	if (!isPhotonState(event.state)) {
+	if (!isPhotonState(historyState)) {
 		// No state (e.g. user navigated to a non-Photon URL). Full reload restores
 		// browser intent without trying to interpret a non-Photon page in-flight.
 		reloadFromServer();
@@ -1356,7 +1383,7 @@ async function handlePopState(
 	// means the server decides what this URL shows now. That is the point of
 	// clearing: the back button after logout gets a login page, not the
 	// previous session's props.
-	const pageData = parsePageData(await readHistoryState(event.state));
+	const pageData = parsePageData(await readHistoryState(historyState));
 	if (ownSeq !== navigationSeq) return;
 	if (!pageData || isStaleVersion(pageData)) {
 		reloadFromServer();
@@ -1371,9 +1398,7 @@ async function handlePopState(
  * all, without a `popstate`. If its history entry can no longer be read — the
  * key was cleared at logout — it must not stay on screen either.
  */
-async function handlePageShow(event: PageTransitionEvent): Promise<void> {
-	if (!event.persisted || typeof history === "undefined") return;
-	const state: unknown = history.state;
+async function handlePageShow(state: unknown): Promise<void> {
 	if (!isPhotonState(state)) return;
 	if ((await readHistoryState(state)) === undefined) reloadFromServer();
 }
@@ -1388,7 +1413,7 @@ function isStaleVersion(pageData: PhotonPageData): boolean {
 }
 
 function reloadFromServer(): void {
-	if (typeof location !== "undefined") location.reload();
+	currentHost()?.reload();
 }
 
 function parsePageData(value: unknown): PhotonPageData | null {
@@ -1535,7 +1560,7 @@ export function readDeferredProps(
 /** A relative URL, or an absolute one over http(s) — never `javascript:`. */
 function isHttpUrl(value: string): boolean {
 	try {
-		const url = new URL(value, location.href);
+		const url = new URL(value, host().href());
 		return url.protocol === "http:" || url.protocol === "https:";
 	} catch {
 		return false;
@@ -1543,10 +1568,5 @@ function isHttpUrl(value: string): boolean {
 }
 
 function fallbackToFullReload(url: string): void {
-	if (typeof location === "undefined") return;
-	try {
-		location.href = url;
-	} catch {
-		// Unreachable in real browsers; jsdom's restricted `location` setter may throw.
-	}
+	currentHost()?.load(url);
 }
