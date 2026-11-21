@@ -168,6 +168,11 @@ describe("photon/client > useInfiniteScroll wiring", () => {
 
 		FakeIntersectionObserver.intersect(dom.end);
 		await vi.waitFor(() => expect(dom.items.children).toHaveLength(4));
+		// A loaded page's rows are tagged two frames after it completes, as
+		// upstream does, by tagging every row still untagged: the other side
+		// is reached once they are, as a reader scrolling there would. Firing
+		// it within those frames tagged page 1's rows as page 3 on a busy machine.
+		await vi.waitFor(() => expect(pageOf(2)).toBe("3"));
 		FakeIntersectionObserver.intersect(dom.start);
 		await vi.waitFor(() => expect(dom.items.children).toHaveLength(6));
 
@@ -184,8 +189,9 @@ describe("photon/client > useInfiniteScroll wiring", () => {
 			["next", { page: 3, completed: true }],
 			["previous", { page: 1, completed: true }],
 		]);
-		await nextFrames();
-		expect([0, 2, 4].map(pageOf)).toEqual(["1", "2", "3"]);
+		await vi.waitFor(() =>
+			expect([0, 2, 4].map(pageOf)).toEqual(["1", "2", "3"]),
+		);
 		scroll.flush();
 	});
 
