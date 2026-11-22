@@ -78,7 +78,6 @@ async function serve(
 ) {
 	const mw = new PhotonMiddleware(config);
 	const ssr = fakeSsr();
-	// biome-ignore lint/correctness/useHookAtTopLevel: a renderer method, not a React hook
 	mw.getRenderer().useDevServer(ssr.server);
 	const { ctx, written } = harness(headers);
 	await mw.middleware()(ctx, async () => {
