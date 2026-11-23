@@ -7,7 +7,7 @@ import { PHOTON_DOCS_BASE_URL as SERVER_BASE_URL } from "../../src/errors.js";
  * imports the server module (which carries `node:` imports through its own
  * call sites). The duplication is documented in both files' JSDoc; this
  * parity test is the contract that prevents silent drift if someone updates
- * one (e.g. moving to `https://docs.ream.dev`) and forgets the other.
+ * one (e.g. moving the docs to another domain) and forgets the other.
  */
 describe("photon > PHOTON_DOCS_BASE_URL parity", () => {
 	it("server and client constants are identical", () => {

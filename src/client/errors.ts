@@ -21,16 +21,15 @@ export type PhotonClientErrorCode =
 
 /**
  * Base URL for the Photon error catalog. See the JSDoc on `PHOTON_DOCS_BASE_URL`
- * in `../errors.ts` for the slug derivation — kept duplicated here so the
+ * in `../errors.ts` for the anchor derivation — kept duplicated here so the
  * browser bundle never imports the server module. The two values MUST stay in
  * sync — `tests/unit/docs-base-url-parity.test.ts` enforces this.
  */
-export const PHOTON_DOCS_BASE_URL = "https://ream.dev";
+export const PHOTON_DOCS_BASE_URL = "https://r-eam.com";
 
 function codeToAnchor(code: PhotonClientErrorCode): string {
-	// Kept in step with the server copy in `../errors.ts`: the `E_` prefix
-	// belongs to the code, not to the catalog heading it links to.
-	return code.replace(/^E_/, "").toLowerCase().replace(/_/g, "-");
+	// Kept in step with the server copy in `../errors.ts`.
+	return code.toLowerCase().replace(/_/g, "-");
 }
 
 function serializeCause(cause: unknown, depth = 0): unknown {
@@ -70,7 +69,7 @@ export class PhotonClientError extends Error {
 		this.code = code;
 		this.hint = options?.hint;
 		this.context = options?.context;
-		this.docsUrl = `${PHOTON_DOCS_BASE_URL}/errors/#${codeToAnchor(code)}`;
+		this.docsUrl = `${PHOTON_DOCS_BASE_URL}/en/reference/errors#${codeToAnchor(code)}`;
 	}
 
 	/**

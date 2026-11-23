@@ -8,7 +8,7 @@ describe("PhotonClientError", () => {
 	it("computes docsUrl from the lowercased, hyphen-separated code", () => {
 		const err = new PhotonClientError("E_PHOTON_HYDRATION_NO_DATA", "boom");
 		expect(err.docsUrl).toBe(
-			`${PHOTON_DOCS_BASE_URL}/errors/#photon-hydration-no-data`,
+			`${PHOTON_DOCS_BASE_URL}/en/reference/errors#e-photon-hydration-no-data`,
 		);
 	});
 
@@ -42,7 +42,7 @@ describe("PhotonClientError", () => {
 			name: "PhotonClientError",
 			code: "E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
 			message: "adapter boom",
-			docsUrl: `${PHOTON_DOCS_BASE_URL}/errors/#photon-hydration-adapter-load-failed`,
+			docsUrl: `${PHOTON_DOCS_BASE_URL}/en/reference/errors#e-photon-hydration-adapter-load-failed`,
 			hint: "install react-dom",
 		});
 	});

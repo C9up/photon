@@ -5,7 +5,7 @@ describe("PhotonError", () => {
 	it("computes docsUrl from the lowercased, hyphen-separated code", () => {
 		const err = new PhotonError("E_PHOTON_INVALID_CONFIG", "boom");
 		expect(err.docsUrl).toBe(
-			`${PHOTON_DOCS_BASE_URL}/errors/#photon-invalid-config`,
+			`${PHOTON_DOCS_BASE_URL}/en/reference/errors#e-photon-invalid-config`,
 		);
 	});
 
@@ -40,7 +40,7 @@ describe("PhotonError", () => {
 			name: "PhotonError",
 			code: "E_PHOTON_SSR_RENDER_FAILED",
 			message: "render boom",
-			docsUrl: `${PHOTON_DOCS_BASE_URL}/errors/#photon-ssr-render-failed`,
+			docsUrl: `${PHOTON_DOCS_BASE_URL}/en/reference/errors#e-photon-ssr-render-failed`,
 			hint: "check your component",
 			context: { url: "/dashboard" },
 		});
