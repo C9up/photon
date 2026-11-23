@@ -71,7 +71,7 @@ describe("photon > PhotonRenderer > prod-mode manifest precheck", () => {
 		// docsUrl must point at the matching anchor — operators jump from the
 		// terminal directly to the recovery page.
 		expect(err.docsUrl).toBe(
-			"https://r-eam.com/en/reference/errors#e-photon-manifest-missing",
+			"https://reamjs.com/en/reference/errors#e-photon-manifest-missing",
 		);
 		// The underlying syscall error must be forwarded as `cause` so EACCES
 		// vs ENOENT is recoverable from the log without re-running.

@@ -29,7 +29,7 @@ export type PhotonErrorCode =
  * bundle never imports the server module. The two values MUST stay in sync —
  * `tests/unit/docs-base-url-parity.test.ts` enforces this.
  */
-export const PHOTON_DOCS_BASE_URL = "https://r-eam.com";
+export const PHOTON_DOCS_BASE_URL = "https://reamjs.com";
 
 function codeToAnchor(code: PhotonErrorCode): string {
 	return code.toLowerCase().replace(/_/g, "-");
