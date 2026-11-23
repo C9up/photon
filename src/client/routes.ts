@@ -29,7 +29,12 @@
  * Browser-only — strict no `node:` imports.
  */
 
-import { PhotonClientError } from "./errors.js";
+import {
+	E_PHOTON_INVALID_PAGE_MODULE,
+	E_PHOTON_MISSING_ROUTE_PARAMS,
+	E_PHOTON_UNKNOWN_PAGE,
+	E_PHOTON_UNKNOWN_ROUTE,
+} from "./errors.js";
 import type { PhotonRoutes } from "./hydrate.js";
 import type { Method } from "./router.js";
 
@@ -78,16 +83,12 @@ export function getRoute(name: string): { path: string; methods: string[] } {
 	const route = registry[name];
 	if (route === undefined) {
 		const known = Object.keys(registry);
-		throw new PhotonClientError(
-			"E_PHOTON_UNKNOWN_ROUTE",
-			`Unknown route '${name}'.`,
-			{
-				hint:
-					known.length > 0
-						? `Known routes: ${known.join(", ")}.`
-						: "No routes are registered — call setRoutes(router.namedRoutes()) first.",
-			},
-		);
+		throw new E_PHOTON_UNKNOWN_ROUTE(`Unknown route '${name}'.`, {
+			help:
+				known.length > 0
+					? `Known routes: ${known.join(", ")}.`
+					: "No routes are registered — call setRoutes(router.namedRoutes()) first.",
+		});
 	}
 	return route;
 }
@@ -114,8 +115,7 @@ export function urlFor(
 	url = url.replace(/\/:[A-Za-z_]\w*\?/g, "");
 	const missing = url.match(/:[A-Za-z_]\w*/g);
 	if (missing) {
-		throw new PhotonClientError(
-			"E_PHOTON_MISSING_ROUTE_PARAMS",
+		throw new E_PHOTON_MISSING_ROUTE_PARAMS(
 			`Route '${name}' needs ${missing.join(", ")}.`,
 			{ context: { route: name, params } },
 		);
@@ -211,7 +211,7 @@ export async function resolvePageComponent<T>(
 			loaded === null ||
 			!("default" in loaded)
 		) {
-			throw new Error(
+			throw new E_PHOTON_INVALID_PAGE_MODULE(
 				`Invalid page exported from "${String(path)}". Make sure to default export a function`,
 			);
 		}
@@ -226,7 +226,7 @@ export async function resolvePageComponent<T>(
 		}
 		return resolved;
 	}
-	throw new Error(`Page not found: "${String(path)}"`);
+	throw new E_PHOTON_UNKNOWN_PAGE(`Page not found: "${String(path)}"`);
 }
 
 /** A lazy page entry — `() => import(...)` — rather than the module itself. */

@@ -22,6 +22,7 @@
  * Browser-only — strict no `node:` imports.
  */
 
+import { E_PHOTON_FORM_DEFAULTS_UNSUPPORTED } from "./errors.js";
 import {
 	type Method,
 	type RequestPayload,
@@ -332,7 +333,7 @@ export function createForm<T extends Data>(
 		setData,
 		setDefaults(field, value) {
 			if (typeof initial === "function") {
-				throw new Error(
+				throw new E_PHOTON_FORM_DEFAULTS_UNSUPPORTED(
 					"You cannot call `setDefaults()` when using a function to define your form data.",
 				);
 			}

@@ -117,6 +117,28 @@ describe("photon/client/adapters/svelte", () => {
 		await expect(
 			svelteAdapter.hydrate(defined(document.getElementById("app")), "C", {}),
 		).rejects.toThrow(/Svelte 5/i);
+		await expect(
+			svelteAdapter.hydrate(defined(document.getElementById("app")), "C", {}),
+		).rejects.toMatchObject({ code: "E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED" });
+	});
+
+	it("refuses a svelteRoot that does not export setPage()", async () => {
+		vi.doMock("svelte", () => ({
+			hydrate: vi.fn(() => ({ id: "root" })),
+			mount: vi.fn(),
+			unmount: vi.fn(),
+		}));
+		const { svelteAdapter } = await import(
+			"../../../../src/client/adapters/svelte.js"
+		);
+		await expect(
+			svelteAdapter.hydrate(
+				defined(document.getElementById("app")),
+				"C",
+				{},
+				{ svelteRoot: "NotPhotonRoot" },
+			),
+		).rejects.toMatchObject({ code: "E_PHOTON_INVALID_SVELTE_ROOT" });
 	});
 
 	it("update is a no-op after unmount (no double-mount)", async () => {

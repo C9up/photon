@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PhotonError } from "../../src/errors.js";
+import { errors } from "../../src/index.js";
 import { createPhotonContext } from "../../src/PhotonContext.js";
 import {
 	PhotonMiddleware,
@@ -276,11 +276,11 @@ describe("photon > PhotonMiddleware", () => {
 	});
 });
 
-describe("photon > PhotonError", () => {
+describe("photon > errors.E_PHOTON_SSR_LOAD_FAILED", () => {
 	it("stores the fully prefixed code verbatim and sets name + message", () => {
-		const err = new PhotonError("E_PHOTON_SSR_LOAD_FAILED", "Render failed");
+		const err = new errors.E_PHOTON_SSR_LOAD_FAILED("Render failed");
 		expect(err.code).toBe("E_PHOTON_SSR_LOAD_FAILED");
-		expect(err.name).toBe("PhotonError");
+		expect(err.name).toBe("E_PHOTON_SSR_LOAD_FAILED");
 		expect(err.message).toBe("Render failed");
 	});
 });

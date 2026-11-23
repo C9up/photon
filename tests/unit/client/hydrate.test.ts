@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 
+import { Exception } from "@c9up/flare";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hydrate, PhotonClientError } from "../../../src/client/hydrate.js";
+import { errors, hydrate } from "../../../src/client/hydrate.js";
 
 interface PageDataInit {
 	component?: string | null;
@@ -297,13 +298,11 @@ describe("photon/client > hydrate — error paths", () => {
 		vi.doUnmock("react");
 	});
 
-	it("PhotonClientError exposes a code and an instanceof Error chain", () => {
-		const err = new PhotonClientError("E_PHOTON_HYDRATION_BAD_DATA", "msg", {
-			hint: "h",
-		});
+	it("a client error exposes a code, a help and a flare Exception chain", () => {
+		const err = new errors.E_PHOTON_HYDRATION_BAD_DATA("msg", { help: "h" });
 		expect(err.code).toBe("E_PHOTON_HYDRATION_BAD_DATA");
-		expect(err.hint).toBe("h");
-		expect(err.name).toBe("PhotonClientError");
-		expect(err instanceof Error).toBe(true);
+		expect(err.help).toBe("h");
+		expect(err.name).toBe("E_PHOTON_HYDRATION_BAD_DATA");
+		expect(err instanceof Exception).toBe(true);
 	});
 });

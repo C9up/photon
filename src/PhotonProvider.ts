@@ -1,4 +1,5 @@
 import "./augmentations.js";
+import { E_PHOTON_MISSING_CONFIG } from "./errors.js";
 import type { PhotonConfig } from "./PhotonRenderer.js";
 import { PhotonRenderer } from "./PhotonRenderer.js";
 
@@ -39,7 +40,9 @@ export default class PhotonProvider {
 		this.app.container.singleton(PhotonRenderer, () => {
 			const config = this.app.config.get<PhotonConfig>("photon");
 			if (!config)
-				throw new Error("Photon config not found — create config/photon.ts");
+				throw new E_PHOTON_MISSING_CONFIG(
+					"Photon config not found — create config/photon.ts",
+				);
 			// The host knows where the application lives; the renderer should not
 			// have to guess from the working directory. An explicit `appRoot` in
 			// the config still wins — a deployment that lays the build out

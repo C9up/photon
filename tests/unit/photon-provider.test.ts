@@ -74,6 +74,9 @@ describe("photon > PhotonProvider", () => {
 		await expect(container.resolve(PhotonRenderer)).rejects.toThrow(
 			/Photon config/,
 		);
+		await expect(container.resolve(PhotonRenderer)).rejects.toMatchObject({
+			code: "E_PHOTON_MISSING_CONFIG",
+		});
 	});
 
 	it("shutdown closes the renderer boot started, and only once", async () => {

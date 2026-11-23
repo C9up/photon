@@ -12,7 +12,11 @@
 
 import { readMetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
-import { PhotonClientError } from "./errors.js";
+import {
+	E_PHOTON_HYDRATION_BAD_DATA,
+	E_PHOTON_HYDRATION_NO_DATA,
+	E_PHOTON_HYDRATION_NO_TARGET,
+} from "./errors.js";
 import { readHistoryState, toHistoryState } from "./history.js";
 import { currentHost, installHost, type PhotonHost } from "./host.js";
 import type { PhotonPageData } from "./hydrate.js";
@@ -146,11 +150,10 @@ function readPageData(): PhotonPageData {
 			? document.getElementById(PHOTON_DATA_ELEMENT_ID)
 			: null;
 	if (!el) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_NO_DATA",
+		throw new E_PHOTON_HYDRATION_NO_DATA(
 			`Missing <script id="${PHOTON_DATA_ELEMENT_ID}"> in the document.`,
 			{
-				hint: "Render the page through PhotonRenderer.render() — the script block is emitted automatically.",
+				help: "Render the page through PhotonRenderer.render() — the script block is emitted automatically.",
 			},
 		);
 	}
@@ -160,11 +163,10 @@ function readPageData(): PhotonPageData {
 	try {
 		parsed = JSON.parse(raw);
 	} catch (err) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_BAD_DATA",
+		throw new E_PHOTON_HYDRATION_BAD_DATA(
 			"Failed to JSON.parse the photon-data block.",
 			{
-				hint: "The script block must contain valid JSON. Check for double-escaping or HTML mangling.",
+				help: "The script block must contain valid JSON. Check for double-escaping or HTML mangling.",
 				cause: err,
 			},
 		);
@@ -175,11 +177,10 @@ function readPageData(): PhotonPageData {
 
 function validatePageData(value: unknown): PhotonPageData {
 	if (!isPlainObject(value)) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_BAD_DATA",
+		throw new E_PHOTON_HYDRATION_BAD_DATA(
 			"photon-data must be a JSON object.",
 			{
-				hint: "Expected { component, props, url, framework } — got non-object.",
+				help: "Expected { component, props, url, framework } — got non-object.",
 			},
 		);
 	}
@@ -187,33 +188,26 @@ function validatePageData(value: unknown): PhotonPageData {
 	const { component, props, url, framework } = value;
 
 	if (typeof component !== "string" || component.length === 0) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_BAD_DATA",
+		throw new E_PHOTON_HYDRATION_BAD_DATA(
 			"photon-data.component must be a non-empty string.",
 		);
 	}
 	if (!isPlainObject(props)) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_BAD_DATA",
+		throw new E_PHOTON_HYDRATION_BAD_DATA(
 			"photon-data.props must be an object.",
 		);
 	}
 	if (typeof url !== "string") {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_BAD_DATA",
-			"photon-data.url must be a string.",
-		);
+		throw new E_PHOTON_HYDRATION_BAD_DATA("photon-data.url must be a string.");
 	}
 	if (typeof framework !== "string") {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_BAD_DATA",
+		throw new E_PHOTON_HYDRATION_BAD_DATA(
 			"photon-data.framework must be a string.",
-			{ hint: `Got: ${typeof framework}.` },
+			{ help: `Got: ${typeof framework}.` },
 		);
 	}
 	if (framework.length === 0) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_BAD_DATA",
+		throw new E_PHOTON_HYDRATION_BAD_DATA(
 			"photon-data.framework must be a non-empty string.",
 		);
 	}
@@ -255,11 +249,10 @@ function resolveTarget(selector: string): Element {
 	const target =
 		typeof document !== "undefined" ? document.querySelector(selector) : null;
 	if (!target) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_NO_TARGET",
+		throw new E_PHOTON_HYDRATION_NO_TARGET(
 			`No DOM node matched the hydrate target selector ${selector}.`,
 			{
-				hint: 'PhotonRenderer emits <div id="app">…</div> by default. Override via hydrate({ target }).',
+				help: 'PhotonRenderer emits <div id="app">…</div> by default. Override via hydrate({ target }).',
 			},
 		);
 	}

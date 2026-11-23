@@ -1,94 +1,94 @@
 /**
- * PhotonClientError — typed error for the browser-side hydration / SPA-nav surface.
- *
- * Mirrors the server-side `PhotonError` shape (from `../errors.ts`) but lives in
- * a separate module so the server-side error class never accidentally lands in
- * the browser bundle (the server file imports nothing browser-incompatible
- * today, but keeping the boundary clean future-proofs against accidents).
- *
- * Browser-only — no `node:` imports.
+ * The browser-side errors of Photon, one class per code, exported by
+ * `@c9up/photon/client` as `errors`. Browser-only — no `node:` imports.
  */
 
-export type PhotonClientErrorCode =
-	| "E_PHOTON_HYDRATION_NO_DATA"
-	| "E_PHOTON_HYDRATION_BAD_DATA"
-	| "E_PHOTON_HYDRATION_NO_TARGET"
-	| "E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK"
-	| "E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED"
-	| "E_PHOTON_UNKNOWN_ROUTE"
-	| "E_PHOTON_MISSING_ROUTE_PARAMS"
-	| "E_PHOTON_UNKNOWN_PAGE";
+import { photonClientErrorClass } from "./photonClientError.js";
 
-/**
- * Base URL for the Photon error catalog. See the JSDoc on `PHOTON_DOCS_BASE_URL`
- * in `../errors.ts` for the anchor derivation — kept duplicated here so the
- * browser bundle never imports the server module. The two values MUST stay in
- * sync — `tests/unit/docs-base-url-parity.test.ts` enforces this.
- */
-export const PHOTON_DOCS_BASE_URL = "https://reamjs.com";
+/** The page holds no Photon page-data script. */
+export const E_PHOTON_HYDRATION_NO_DATA = photonClientErrorClass(
+	"E_PHOTON_HYDRATION_NO_DATA",
+);
 
-function codeToAnchor(code: PhotonClientErrorCode): string {
-	// Kept in step with the server copy in `../errors.ts`.
-	return code.toLowerCase().replace(/_/g, "-");
-}
+/** The page-data script does not hold a usable page object. */
+export const E_PHOTON_HYDRATION_BAD_DATA = photonClientErrorClass(
+	"E_PHOTON_HYDRATION_BAD_DATA",
+);
 
-function serializeCause(cause: unknown, depth = 0): unknown {
-	if (cause === undefined) return undefined;
-	if (depth > 5) return "[Photon: cause chain truncated at depth 5]";
-	if (cause instanceof PhotonClientError) return cause.toJSON();
-	if (cause instanceof Error) {
-		return {
-			name: cause.name,
-			message: cause.message,
-			cause: serializeCause(cause.cause, depth + 1),
-		};
-	}
-	return cause;
-}
+/** The element to hydrate into is not in the page. */
+export const E_PHOTON_HYDRATION_NO_TARGET = photonClientErrorClass(
+	"E_PHOTON_HYDRATION_NO_TARGET",
+);
 
-export class PhotonClientError extends Error {
-	readonly code: PhotonClientErrorCode;
-	readonly hint?: string;
-	readonly context?: Record<string, unknown>;
-	readonly docsUrl: string;
+/** The page names a framework Photon has no adapter for. */
+export const E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK = photonClientErrorClass(
+	"E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
+);
 
-	constructor(
-		code: PhotonClientErrorCode,
-		message: string,
-		options?: {
-			hint?: string;
-			cause?: unknown;
-			context?: Record<string, unknown>;
-		},
-	) {
-		super(
-			message,
-			options?.cause !== undefined ? { cause: options.cause } : undefined,
-		);
-		this.name = "PhotonClientError";
-		this.code = code;
-		this.hint = options?.hint;
-		this.context = options?.context;
-		this.docsUrl = `${PHOTON_DOCS_BASE_URL}/en/reference/errors#${codeToAnchor(code)}`;
-	}
+/** The framework adapter could not be loaded. */
+export const E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED = photonClientErrorClass(
+	"E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
+);
 
-	/**
-	 * JSON-serializable view of the error — invoked by `JSON.stringify`. Adds
-	 * `name` + `message` (which are non-enumerable on `Error` subclasses) and
-	 * walks the `cause` chain so devtools / log shippers see the full failure
-	 * context.
-	 */
-	toJSON(): Record<string, unknown> {
-		const out: Record<string, unknown> = {
-			name: this.name,
-			code: this.code,
-			message: this.message,
-			docsUrl: this.docsUrl,
-		};
-		if (this.hint !== undefined) out.hint = this.hint;
-		if (this.context !== undefined) out.context = this.context;
-		const cause = serializeCause(this.cause);
-		if (cause !== undefined) out.cause = cause;
-		return out;
-	}
-}
+/** No route of the manifest has that name. */
+export const E_PHOTON_UNKNOWN_ROUTE = photonClientErrorClass(
+	"E_PHOTON_UNKNOWN_ROUTE",
+);
+
+/** A route was built without one of its parameters. */
+export const E_PHOTON_MISSING_ROUTE_PARAMS = photonClientErrorClass(
+	"E_PHOTON_MISSING_ROUTE_PARAMS",
+);
+
+/** `resolve()` found no module for a page name. */
+export const E_PHOTON_UNKNOWN_PAGE = photonClientErrorClass(
+	"E_PHOTON_UNKNOWN_PAGE",
+);
+
+/** A page module has no usable default export. */
+export const E_PHOTON_INVALID_PAGE_MODULE = photonClientErrorClass(
+	"E_PHOTON_INVALID_PAGE_MODULE",
+);
+
+/** A Photon visit was answered with something that is not a page object. */
+export const E_PHOTON_INVALID_PAGE_RESPONSE = photonClientErrorClass(
+	"E_PHOTON_INVALID_PAGE_RESPONSE",
+);
+
+/** A router helper ran outside a Photon app. */
+export const E_PHOTON_NO_ROUTER_HOST = photonClientErrorClass(
+	"E_PHOTON_NO_ROUTER_HOST",
+);
+
+/** A page helper ran before any page was mounted. */
+export const E_PHOTON_NO_PAGE = photonClientErrorClass("E_PHOTON_NO_PAGE");
+
+/** An infinite-scroll helper names a prop the page does not hold. */
+export const E_PHOTON_UNKNOWN_SCROLL_PROP = photonClientErrorClass(
+	"E_PHOTON_UNKNOWN_SCROLL_PROP",
+);
+
+/** A deferred-props helper was given what it cannot load. */
+export const E_PHOTON_INVALID_DEFERRED = photonClientErrorClass(
+	"E_PHOTON_INVALID_DEFERRED",
+);
+
+/** A form helper was used without its initial data. */
+export const E_PHOTON_FORM_DATA_MISSING = photonClientErrorClass(
+	"E_PHOTON_FORM_DATA_MISSING",
+);
+
+/** A form store was asked for defaults it cannot hold. */
+export const E_PHOTON_FORM_DEFAULTS_UNSUPPORTED = photonClientErrorClass(
+	"E_PHOTON_FORM_DEFAULTS_UNSUPPORTED",
+);
+
+/** The Svelte root component is not one. */
+export const E_PHOTON_INVALID_SVELTE_ROOT = photonClientErrorClass(
+	"E_PHOTON_INVALID_SVELTE_ROOT",
+);
+
+/** The SSR `setup` returned what Photon cannot render. */
+export const E_PHOTON_INVALID_SSR_SETUP = photonClientErrorClass(
+	"E_PHOTON_INVALID_SSR_SETUP",
+);

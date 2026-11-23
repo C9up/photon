@@ -15,7 +15,10 @@
 
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { bootPage } from "./boot.js";
-import { PhotonClientError } from "./errors.js";
+import {
+	E_PHOTON_HYDRATION_NO_TARGET,
+	E_PHOTON_UNKNOWN_PAGE,
+} from "./errors.js";
 import type { PhotonPageData } from "./hydrate.js";
 
 /** What the `App` of each framework is given. */
@@ -40,10 +43,9 @@ export async function resolvePage(
 ): Promise<unknown> {
 	const resolved: unknown = await resolve(name);
 	if (resolved === undefined || resolved === null) {
-		throw new PhotonClientError(
-			"E_PHOTON_UNKNOWN_PAGE",
+		throw new E_PHOTON_UNKNOWN_PAGE(
 			`resolve() found no page named '${name}'.`,
-			{ hint: "Check the path your resolve() builds from the page name." },
+			{ help: "Check the path your resolve() builds from the page name." },
 		);
 	}
 	if (typeof resolved === "object" && "default" in resolved) {
@@ -98,8 +100,7 @@ export async function startApp(options: StartAppOptions): Promise<void> {
 		}),
 		mount: async (target, Component, page) => {
 			if (!(target instanceof HTMLElement)) {
-				throw new PhotonClientError(
-					"E_PHOTON_HYDRATION_NO_TARGET",
+				throw new E_PHOTON_HYDRATION_NO_TARGET(
 					`#${options.id ?? "app"} is not an HTML element.`,
 				);
 			}

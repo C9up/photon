@@ -2,7 +2,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PhotonError } from "../../src/errors.js";
+import { errors } from "../../src/index.js";
 import {
 	type PageProps,
 	type PhotonConfig,
@@ -210,12 +210,14 @@ describe("photon > PhotonRenderer > render() with an SSR module", () => {
 		);
 	});
 
-	it("wraps a thrown render() error into a generic SSR_RENDER_FAILED PhotonError", async () => {
+	it("wraps a thrown render() error into a generic E_PHOTON_SSR_RENDER_FAILED", async () => {
 		const r = new PhotonRenderer(baseConfig);
 		attachSsrModule(r, () => {
 			throw new Error("boom");
 		});
-		await expect(r.render("Home", {}, "/")).rejects.toBeInstanceOf(PhotonError);
+		await expect(r.render("Home", {}, "/")).rejects.toBeInstanceOf(
+			errors.E_PHOTON_SSR_RENDER_FAILED,
+		);
 	});
 });
 
@@ -273,7 +275,9 @@ describe("photon > PhotonRenderer > boot() validation", () => {
 			...baseConfig,
 			buildDir: "../escape",
 		});
-		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
+		await expect(r.boot()).rejects.toBeInstanceOf(
+			errors.E_PHOTON_INVALID_CONFIG,
+		);
 	});
 
 	it("rejects an ssr.entrypoint with path traversal", async () => {
@@ -281,7 +285,9 @@ describe("photon > PhotonRenderer > boot() validation", () => {
 			...baseConfig,
 			ssr: { enabled: true, entrypoint: "../etc/passwd" },
 		});
-		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
+		await expect(r.boot()).rejects.toBeInstanceOf(
+			errors.E_PHOTON_INVALID_CONFIG,
+		);
 	});
 
 	it("rejects entryClient with disallowed characters via E_INVALID_CONFIG", async () => {
@@ -289,13 +295,17 @@ describe("photon > PhotonRenderer > boot() validation", () => {
 			...baseConfig,
 			entryClient: "evil!@#$.tsx",
 		});
-		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
+		await expect(r.boot()).rejects.toBeInstanceOf(
+			errors.E_PHOTON_INVALID_CONFIG,
+		);
 	});
 
-	it("throws SSR_LOAD_FAILED when the SSR bundle is absent at the expected paths", async () => {
+	it("throws E_PHOTON_MANIFEST_MISSING when the build is absent at the expected paths", async () => {
 		await fsp.mkdir(path.join(cwd, "public/build"), { recursive: true });
 		const r = new PhotonRenderer(baseConfig);
-		await expect(r.boot()).rejects.toBeInstanceOf(PhotonError);
+		await expect(r.boot()).rejects.toBeInstanceOf(
+			errors.E_PHOTON_MANIFEST_MISSING,
+		);
 	});
 
 	it("boots without an SSR bundle when SSR is off", async () => {

@@ -8,6 +8,7 @@
 
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import {
 	afterEach,
 	beforeAll,
@@ -138,6 +139,29 @@ describe("photon/react > useForm", () => {
 			"a clean success",
 		);
 		expect(fetchMock.mock.calls[1]?.[1]?.body).toBe('{"email":"a@b.c"}');
+	});
+});
+
+/**
+ * Calls `useForm` with a remember key alone. The overloads refuse it;
+ * JavaScript callers can still pass one, and that is what is refused.
+ */
+function Remembered(): null {
+	Reflect.apply(useReactForm, undefined, ["Signup"]);
+	return null;
+}
+
+describe("photon > useForm with a remember key and no data", () => {
+	it("refuses it in React", () => {
+		expect(() => renderToString(createElement(Remembered))).toThrow(
+			expect.objectContaining({ code: "E_PHOTON_FORM_DATA_MISSING" }),
+		);
+	});
+
+	it("refuses it in Vue", () => {
+		expect(() => Reflect.apply(createVueForm, undefined, ["Signup"])).toThrow(
+			expect.objectContaining({ code: "E_PHOTON_FORM_DATA_MISSING" }),
+		);
 	});
 });
 

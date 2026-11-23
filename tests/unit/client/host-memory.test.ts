@@ -8,7 +8,7 @@
  * protocol is the browser's: same headers, same page objects, same answers
  * to a stale version.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	bootPage,
 	type PhotonAdapterHandle,
@@ -173,5 +173,21 @@ describe("photon/client > a host with no document", () => {
 				mount: async () => ({ update: () => {}, unmount: () => {} }),
 			}),
 		).rejects.toThrow(/not a page object/);
+		await expect(
+			bootPage({
+				host: memory.host,
+				url: "/",
+				resolveComponent: async (name) => ({ default: name }),
+				mount: async () => ({ update: () => {}, unmount: () => {} }),
+			}),
+		).rejects.toMatchObject({ code: "E_PHOTON_INVALID_PAGE_RESPONSE" });
+	});
+
+	it("refuses to request a page with no host to run on", async () => {
+		vi.resetModules();
+		const fresh = await import("../../../src/client/router.js");
+		await expect(fresh.requestPage("/")).rejects.toMatchObject({
+			code: "E_PHOTON_NO_ROUTER_HOST",
+		});
 	});
 });

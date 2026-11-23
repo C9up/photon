@@ -6,6 +6,7 @@
  * the getters read, so Svelte re-renders what read the form.
  */
 
+import { E_PHOTON_FORM_DATA_MISSING } from "../errors.js";
 import { createForm } from "../form.js";
 
 const STATE_KEYS = [
@@ -26,7 +27,9 @@ export function useForm(keyOrData, maybeData) {
 	let store;
 	if (typeof keyOrData === "string") {
 		if (maybeData === undefined) {
-			throw new Error("useForm(rememberKey, data) needs the data too.");
+			throw new E_PHOTON_FORM_DATA_MISSING(
+				"useForm(rememberKey, data) needs the data too.",
+			);
 		}
 		store = createForm(maybeData, { rememberKey: keyOrData });
 	} else {

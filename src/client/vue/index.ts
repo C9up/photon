@@ -47,7 +47,11 @@ import {
 	type ResolvePage,
 	startApp,
 } from "../app.js";
-import { PhotonClientError } from "../errors.js";
+import {
+	E_PHOTON_FORM_DATA_MISSING,
+	E_PHOTON_INVALID_DEFERRED,
+	E_PHOTON_UNKNOWN_PAGE,
+} from "../errors.js";
 import { createForm, type FormErrors, type FormStore } from "../form.js";
 import {
 	createFormController,
@@ -163,8 +167,7 @@ export const App = defineComponent(
 		return () => {
 			const { component, props: pageProps } = current.value;
 			if (!isComponent(component)) {
-				throw new PhotonClientError(
-					"E_PHOTON_UNKNOWN_PAGE",
+				throw new E_PHOTON_UNKNOWN_PAGE(
 					"The page component resolve() gave is not a Vue component.",
 				);
 			}
@@ -321,7 +324,9 @@ export const Deferred = defineComponent(
 		});
 		return () => {
 			if (!slots.fallback) {
-				throw new Error("`<Deferred>` requires a `<template #fallback>` slot");
+				throw new E_PHOTON_INVALID_DEFERRED(
+					"`<Deferred>` requires a `<template #fallback>` slot",
+				);
 			}
 			const defined = keys.value.every(
 				(key) => propAt(page.props, key) !== undefined,
@@ -861,7 +866,9 @@ export function useForm<T extends FormFields>(
 	let store: FormStore<T>;
 	if (typeof keyOrData === "string") {
 		if (maybeData === undefined) {
-			throw new Error("useForm(rememberKey, data) needs the data too.");
+			throw new E_PHOTON_FORM_DATA_MISSING(
+				"useForm(rememberKey, data) needs the data too.",
+			);
 		}
 		store = createForm(maybeData, { rememberKey: keyOrData });
 	} else {

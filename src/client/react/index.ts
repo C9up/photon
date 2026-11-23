@@ -48,7 +48,12 @@ import {
 	type ResolvePage,
 	startApp,
 } from "../app.js";
-import { PhotonClientError } from "../errors.js";
+import {
+	E_PHOTON_FORM_DATA_MISSING,
+	E_PHOTON_INVALID_DEFERRED,
+	E_PHOTON_NO_PAGE,
+	E_PHOTON_UNKNOWN_PAGE,
+} from "../errors.js";
 import { createForm, type FormState, type FormStore } from "../form.js";
 import {
 	createFormController,
@@ -106,7 +111,7 @@ export function usePage(): PhotonPageData {
 	);
 	const page = provided ?? current;
 	if (page === undefined) {
-		throw new Error(
+		throw new E_PHOTON_NO_PAGE(
 			"usePage must be used within a Photon page — or, on the server, inside <PhotonPage page={pageData}>.",
 		);
 	}
@@ -140,8 +145,7 @@ export function App({
 		[],
 	);
 	if (!isElementType(current.component)) {
-		throw new PhotonClientError(
-			"E_PHOTON_UNKNOWN_PAGE",
+		throw new E_PHOTON_UNKNOWN_PAGE(
 			"The page component resolve() gave is not a React component.",
 		);
 	}
@@ -259,11 +263,15 @@ export function Deferred({
 	fallback,
 }: DeferredProps): ReactNode {
 	if (!data) {
-		throw new Error(
+		throw new E_PHOTON_INVALID_DEFERRED(
 			"`<Deferred>` requires a `data` prop to be a string or array of strings",
 		);
 	}
-	if (!fallback) throw new Error("`<Deferred>` requires a `fallback` prop");
+	if (!fallback) {
+		throw new E_PHOTON_INVALID_DEFERRED(
+			"`<Deferred>` requires a `fallback` prop",
+		);
+	}
 	const [reloading, setReloading] = useState(false);
 	const activeReloads = useRef(new Set<Visit>());
 	const page = usePage();
@@ -915,7 +923,9 @@ export function useForm<T extends FormValues>(
 	const [store] = useState(() => {
 		if (typeof keyOrData === "string") {
 			if (maybeData === undefined) {
-				throw new Error("useForm(rememberKey, data) needs the data too.");
+				throw new E_PHOTON_FORM_DATA_MISSING(
+					"useForm(rememberKey, data) needs the data too.",
+				);
 			}
 			return createForm(maybeData, { rememberKey: keyOrData });
 		}

@@ -140,6 +140,15 @@ describe("photon/client > form state", () => {
 	});
 });
 
+describe("photon/client > form defaults", () => {
+	it("refuses setDefaults() on a form whose data is a function", () => {
+		const form = createForm(() => ({ email: "" }));
+		expect(() => form.setDefaults()).toThrow(
+			expect.objectContaining({ code: "E_PHOTON_FORM_DEFAULTS_UNSUPPORTED" }),
+		);
+	});
+});
+
 describe("photon/client > form elements", () => {
 	it("reads bracketed field names into nested data", () => {
 		const data = new FormData();

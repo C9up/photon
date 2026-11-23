@@ -22,6 +22,10 @@
  */
 
 import {
+	E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED,
+	E_PHOTON_INVALID_SVELTE_ROOT,
+} from "../errors.js";
+import {
 	isServerRendered,
 	type PhotonAdapter,
 	type PhotonAdapterHandle,
@@ -72,8 +76,7 @@ export const svelteAdapter: PhotonAdapter = {
 			typeof svelte.hydrate !== "function" ||
 			typeof svelte.unmount !== "function"
 		) {
-			// Surfaces as E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED in the caller.
-			throw new Error(
+			throw new E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED(
 				"svelte module is missing `hydrate` or `unmount`. Photon's Svelte adapter requires Svelte 5+.",
 			);
 		}
@@ -90,7 +93,7 @@ export const svelteAdapter: PhotonAdapter = {
 			});
 			const setPage = setPageOf(rootInstance);
 			if (setPage === undefined) {
-				throw new Error(
+				throw new E_PHOTON_INVALID_SVELTE_ROOT(
 					"svelteRoot does not export setPage(). Pass the root from `@c9up/photon/svelte`.",
 				);
 			}

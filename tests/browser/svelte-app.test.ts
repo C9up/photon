@@ -51,6 +51,23 @@ afterEach(() => {
 });
 
 describe("photon/svelte > createPhotonApp", () => {
+	it("refuses a server render without a setup", async () => {
+		const page: PhotonPageData = {
+			component: "UrlPage",
+			framework: "svelte",
+			url: "/start",
+			props: {},
+		};
+		// The types require a setup on the server; a JavaScript caller can
+		// still leave it out, and that is what is refused.
+		const started: unknown = Reflect.apply(createPhotonApp, undefined, [
+			{ page, resolve: (name: string) => fixtures[name] },
+		]);
+		await expect(Promise.resolve(started)).rejects.toMatchObject({
+			code: "E_PHOTON_INVALID_SSR_SETUP",
+		});
+	});
+
 	it("renders { head, body } on the server, usePage reading the page", async () => {
 		const { head, body } = await renderSvelteApp("UrlPage", {}, "/start");
 		expect(head).toEqual([]);

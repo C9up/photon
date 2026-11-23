@@ -7,10 +7,13 @@
 
 export type { PhotonAdapterHandle } from "./adapters/types.js";
 export { type BootPageOptions, bootPage } from "./boot.js";
-export type { PhotonClientErrorCode } from "./errors.js";
-export { PhotonClientError } from "./errors.js";
+export * as errors from "./errors.js";
 export { browserHost, type PhotonEvent, type PhotonHost } from "./host.js";
 export type { PhotonPageData } from "./hydrate.js";
+export type {
+	PhotonClientError,
+	PhotonClientErrorCode,
+} from "./photonClientError.js";
 export type {
 	PartialRequest,
 	ResolveComponent,

@@ -29,6 +29,7 @@
  * Browser-only — strict no `node:` imports.
  */
 
+import { E_PHOTON_UNKNOWN_SCROLL_PROP } from "./errors.js";
 import type { PhotonPageData, ScrollPropMeta } from "./hydrate.js";
 import {
 	getCurrentPage,
@@ -102,7 +103,7 @@ export function useInfiniteScrollData(
 	const scrollProp = (): ScrollPropMeta => {
 		const meta = getCurrentPage()?.scrollProps?.[options.getPropName()];
 		if (meta !== undefined) return meta;
-		throw new Error(
+		throw new E_PHOTON_UNKNOWN_SCROLL_PROP(
 			`The page object does not contain a scroll prop named "${options.getPropName()}".`,
 		);
 	};

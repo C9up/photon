@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PhotonClientError } from "../../../src/client/errors.js";
+import { errors } from "../../../src/client/hydrate.js";
 import { bootRouter, router } from "../../../src/client/router.js";
 import {
 	getRoute,
@@ -41,15 +41,12 @@ describe("photon/client > named routes", () => {
 
 	it("names an unknown route and a missing param", () => {
 		const unknown = (): string => urlFor("nope");
-		expect(unknown).toThrow(PhotonClientError);
+		expect(unknown).toThrow(errors.E_PHOTON_UNKNOWN_ROUTE);
 		expect(unknown).toThrow(/Unknown route 'nope'/);
 		try {
 			urlFor("users.show");
 		} catch (error) {
-			expect(error).toBeInstanceOf(PhotonClientError);
-			if (error instanceof PhotonClientError) {
-				expect(error.code).toBe("E_PHOTON_MISSING_ROUTE_PARAMS");
-			}
+			expect(error).toBeInstanceOf(errors.E_PHOTON_MISSING_ROUTE_PARAMS);
 		}
 	});
 
@@ -137,8 +134,14 @@ describe("photon/client > resolvePageComponent", () => {
 		await expect(resolvePageComponent("Nope", {})).rejects.toThrow(
 			'Page not found: "Nope"',
 		);
+		await expect(resolvePageComponent("Nope", {})).rejects.toMatchObject({
+			code: "E_PHOTON_UNKNOWN_PAGE",
+		});
 		await expect(
 			resolvePageComponent("Bad", { Bad: loadNothing }),
 		).rejects.toThrow(/default export/);
+		await expect(
+			resolvePageComponent("Bad", { Bad: loadNothing }),
+		).rejects.toMatchObject({ code: "E_PHOTON_INVALID_PAGE_MODULE" });
 	});
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PHOTON_DOCS_BASE_URL as CLIENT_BASE_URL } from "../../src/client/errors.js";
-import { PHOTON_DOCS_BASE_URL as SERVER_BASE_URL } from "../../src/errors.js";
+import { PHOTON_DOCS_BASE_URL as CLIENT_BASE_URL } from "../../src/client/photonClientError.js";
+import { PHOTON_DOCS_BASE_URL as SERVER_BASE_URL } from "../../src/photonError.js";
 
 /**
  * `PHOTON_DOCS_BASE_URL` is duplicated by design — the browser bundle never

@@ -14,6 +14,11 @@
  * behaviour are theirs.
  */
 
+import {
+	E_PHOTON_INVALID_DURATION,
+	E_PHOTON_SCROLL_CURSOR_UNDERIVABLE,
+} from "./errors.js";
+
 /** Brands a prop so the resolver can tell the kinds apart at runtime. */
 const PROP_KIND = Symbol.for("photon.propKind");
 
@@ -334,7 +339,7 @@ function isString(value: unknown): value is string {
 function offsetPaginatorCursor(value: unknown): ScrollCursor {
 	const currentPage = pageField(value, "currentPage", isNumber);
 	if (currentPage === undefined) {
-		throw new TypeError(
+		throw new E_PHOTON_SCROLL_CURSOR_UNDERIVABLE(
 			'Cannot derive an infinite-scroll cursor from this value. Pass a cursor callback as the second argument to "scroll()" for cursor paginators and custom sources.',
 		);
 	}
@@ -400,7 +405,7 @@ function durationToMs(value: number | string): number {
 	const match = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$/i.exec(value);
 	const unit = DURATION_UNITS.get((match?.[2] ?? "ms").toLowerCase());
 	if (match?.[1] === undefined || unit === undefined) {
-		throw new TypeError(
+		throw new E_PHOTON_INVALID_DURATION(
 			`Cannot read "${value}" as a duration. Use milliseconds, or a unit: 500ms, 30s, 5m, 2h, 7d, 1w.`,
 		);
 	}

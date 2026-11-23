@@ -23,8 +23,13 @@
 import type { MetaTags } from "../seo/Meta.js";
 import type { PhotonAdapter } from "./adapters/types.js";
 import { bootPage } from "./boot.js";
-import { PhotonClientError } from "./errors.js";
+import {
+	E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED,
+	E_PHOTON_HYDRATION_NO_TARGET,
+	E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK,
+} from "./errors.js";
 import type { OncePropMeta } from "./mergeProps.js";
+import { isPhotonClientError } from "./photonClientError.js";
 import {
 	isClientFramework,
 	type ResolveComponent,
@@ -146,9 +151,8 @@ export type { PhotonAdapterHandle } from "./adapters/types.js";
  * updates. `hydrate()` is this with one of photon's bundled adapters.
  */
 export { type BootPageOptions, bootPage } from "./boot.js";
-export type { PhotonClientErrorCode } from "./errors.js";
-/** Re-export so consumers can `instanceof`-check without a second import. */
-export { PhotonClientError } from "./errors.js";
+/** The client's errors, one class per code, to test with `instanceof`. */
+export * as errors from "./errors.js";
 /** Where the router runs: the browser by default, an app's host through `bootPage({ host })`. */
 export { browserHost, type PhotonEvent, type PhotonHost } from "./host.js";
 export {
@@ -163,6 +167,10 @@ export {
 	useInfiniteScroll,
 	useInfiniteScrollData,
 } from "./infiniteScroll.js";
+export type {
+	PhotonClientError,
+	PhotonClientErrorCode,
+} from "./photonClientError.js";
 export type {
 	PartialRequest,
 	ResolveComponent,
@@ -197,8 +205,7 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 		mount: async (target, Component, page) => {
 			const adapter = await loadAdapter(page.framework);
 			if (target === undefined) {
-				throw new PhotonClientError(
-					"E_PHOTON_HYDRATION_NO_TARGET",
+				throw new E_PHOTON_HYDRATION_NO_TARGET(
 					"hydrate() mounts into a DOM node; it was given none.",
 				);
 			}
@@ -211,10 +218,9 @@ export async function hydrate(options: HydrateOptions): Promise<void> {
 
 async function loadAdapter(framework: string): Promise<PhotonAdapter> {
 	if (!isClientFramework(framework)) {
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK",
+		throw new E_PHOTON_HYDRATION_UNSUPPORTED_FRAMEWORK(
 			`Unsupported framework: ${framework}.`,
-			{ hint: `Supported: ${SUPPORTED_FRAMEWORKS.join(", ")}.` },
+			{ help: `Supported: ${SUPPORTED_FRAMEWORKS.join(", ")}.` },
 		);
 	}
 
@@ -234,12 +240,11 @@ async function loadAdapter(framework: string): Promise<PhotonAdapter> {
 			}
 		}
 	} catch (err) {
-		if (err instanceof PhotonClientError) throw err;
-		throw new PhotonClientError(
-			"E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED",
+		if (isPhotonClientError(err)) throw err;
+		throw new E_PHOTON_HYDRATION_ADAPTER_LOAD_FAILED(
 			`Failed to load the ${framework} adapter.`,
 			{
-				hint: `Install the framework's runtime as a dependency: pnpm add ${frameworkInstallSpec(framework)}.`,
+				help: `Install the framework's runtime as a dependency: pnpm add ${frameworkInstallSpec(framework)}.`,
 				cause: err,
 			},
 		);

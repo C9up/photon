@@ -126,6 +126,33 @@ function Stats(props: Record<string, unknown>): ReactNode {
 	return createElement(Deferred, deferred);
 }
 
+/** Calls the page hook it is given — a fresh module's, outside any page. */
+function Orphan({ read }: { read: () => unknown }): null {
+	read();
+	return null;
+}
+
+describe("photon/react > misuse", () => {
+	it("refuses a Deferred without a fallback", () => {
+		const props: DeferredProps = {
+			data: "stats",
+			fallback: null,
+			children: () => null,
+		};
+		expect(() => renderToString(createElement(Deferred, props))).toThrow(
+			expect.objectContaining({ code: "E_PHOTON_INVALID_DEFERRED" }),
+		);
+	});
+
+	it("refuses usePage outside a page", async () => {
+		vi.resetModules();
+		const fresh = await import("../../../src/client/react/index.js");
+		expect(() =>
+			renderToString(createElement(Orphan, { read: fresh.usePage })),
+		).toThrow(expect.objectContaining({ code: "E_PHOTON_NO_PAGE" }));
+	});
+});
+
 describe("photon/react > Deferred", () => {
 	it("shows the fallback until the deferred group arrives", async () => {
 		let release: (() => void) | undefined;

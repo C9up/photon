@@ -8,7 +8,7 @@ import "./augmentations.js";
 
 export { defineConfig } from "./config.js";
 export { configure } from "./configure.js";
-export { PhotonError } from "./errors.js";
+export * as errors from "./errors.js";
 export type {
 	PhotonContext,
 	SharedData,
@@ -31,6 +31,7 @@ export type {
 	SsrRequestContext,
 } from "./PhotonRenderer.js";
 export { PhotonRenderer } from "./PhotonRenderer.js";
+export type { PhotonError, PhotonErrorCode } from "./photonError.js";
 export {
 	type AlwaysProp,
 	always,

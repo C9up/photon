@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
 import type { Snippet } from "svelte";
+import { E_PHOTON_INVALID_DEFERRED } from "../errors.js";
 import { partialReloadRequestsProp, router, type Visit } from "../router.js";
 import { usePage } from "./page.svelte.js";
 
@@ -65,7 +66,11 @@ $effect(() => {
 });
 
 $effect.pre(() => {
-	if (!fallback) throw new Error("`<Deferred>` requires a `fallback` snippet");
+	if (!fallback) {
+		throw new E_PHOTON_INVALID_DEFERRED(
+			"`<Deferred>` requires a `fallback` snippet",
+		);
+	}
 });
 </script>
 

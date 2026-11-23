@@ -12,6 +12,7 @@
 import { hydrate, mount } from "svelte";
 import { isServerRendered } from "../adapters/types.js";
 import { appPropsFor, startApp } from "../app.js";
+import { E_PHOTON_INVALID_SSR_SETUP } from "../errors.js";
 import PhotonRoot from "./PhotonRoot.svelte";
 
 /**
@@ -25,7 +26,7 @@ import PhotonRoot from "./PhotonRoot.svelte";
 export async function createPhotonApp({ id, resolve, setup, page }) {
 	if (page !== undefined) {
 		if (setup === undefined) {
-			throw new TypeError(
+			throw new E_PHOTON_INVALID_SSR_SETUP(
 				"createPhotonApp needs a setup on the server that returns render(App, { props }) from svelte/server.",
 			);
 		}
@@ -38,7 +39,7 @@ export async function createPhotonApp({ id, resolve, setup, page }) {
 		const body = Reflect.get(Object(result), "body");
 		const head = Reflect.get(Object(result), "head");
 		if (typeof body !== "string") {
-			throw new TypeError(
+			throw new E_PHOTON_INVALID_SSR_SETUP(
 				"createPhotonApp's setup must return render(App, { props }) from svelte/server on the server.",
 			);
 		}

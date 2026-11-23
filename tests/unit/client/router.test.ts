@@ -1565,6 +1565,9 @@ describe("photon/client > infinite scroll data", () => {
 		expect(() => useInfiniteScrollData({ getPropName: () => "users" })).toThrow(
 			/scroll prop named "users"/,
 		);
+		expect(() => useInfiniteScrollData({ getPropName: () => "users" })).toThrow(
+			expect.objectContaining({ code: "E_PHOTON_UNKNOWN_SCROLL_PROP" }),
+		);
 	});
 });
 

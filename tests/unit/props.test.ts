@@ -371,6 +371,9 @@ describe("photon > once", () => {
 		await expect(
 			resolveProps({ v: once(1, { expiresIn: "soon" }) }, "F"),
 		).rejects.toThrow(/Cannot read "soon" as a duration/);
+		await expect(
+			resolveProps({ v: once(1, { expiresIn: "soon" }) }, "F"),
+		).rejects.toMatchObject({ code: "E_PHOTON_INVALID_DURATION" });
 	});
 
 	it("lets an absolute date win over a relative one", async () => {
@@ -549,6 +552,9 @@ describe("photon > scroll", () => {
 		await expect(
 			resolveProps({ feed: scroll({ data: [1] }) }, "F"),
 		).rejects.toThrow(/Cannot derive an infinite-scroll cursor/);
+		await expect(
+			resolveProps({ feed: scroll({ data: [1] }) }, "F"),
+		).rejects.toMatchObject({ code: "E_PHOTON_SCROLL_CURSOR_UNDERIVABLE" });
 	});
 
 	it("is left out of a partial reload that did not ask for it", async () => {

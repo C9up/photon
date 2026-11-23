@@ -8,8 +8,15 @@ import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { PhotonError } from "./errors.js";
+import {
+	E_PHOTON_INVALID_CONFIG,
+	E_PHOTON_MANIFEST_INVALID,
+	E_PHOTON_MANIFEST_MISSING,
+	E_PHOTON_SSR_LOAD_FAILED,
+	E_PHOTON_SSR_RENDER_FAILED,
+} from "./errors.js";
 import type { PhotonMiddlewareContext } from "./PhotonMiddleware.js";
+import { isPhotonError } from "./photonError.js";
 import type { PropsProtocolExtras, PropsRequest } from "./props.js";
 import { buildPageObject } from "./protocol.js";
 import { missingSecurityHeaders, resolveNonce } from "./requestSecurity.js";
@@ -334,11 +341,10 @@ export class PhotonRenderer {
 				const entrypoint = this.#ssrEntrypoint();
 				this.#ssrModule = {
 					render: () => {
-						throw new PhotonError(
-							"E_PHOTON_SSR_LOAD_FAILED",
+						throw new E_PHOTON_SSR_LOAD_FAILED(
 							`SSR is enabled but ${entrypoint} does not exist`,
 							{
-								hint: "Create the SSR entry point, point ssr.entrypoint at it, or turn ssr.enabled off.",
+								help: "Create the SSR entry point, point ssr.entrypoint at it, or turn ssr.enabled off.",
 							},
 						);
 					},
@@ -373,11 +379,10 @@ export class PhotonRenderer {
 				);
 				const render = pickRender(loaded);
 				if (render === undefined) {
-					throw new PhotonError(
-						"E_PHOTON_SSR_LOAD_FAILED",
+					throw new E_PHOTON_SSR_LOAD_FAILED(
 						`${this.#ssrEntrypoint()} does not export a render() function`,
 						{
-							hint: "Export `render(page)` from the SSR entry point, as its default export.",
+							help: "Export `render(page)` from the SSR entry point, as its default export.",
 						},
 					);
 				}
@@ -440,18 +445,16 @@ export class PhotonRenderer {
 			);
 			for (const served of [absBuildDir, path.join(projectRoot, "public")]) {
 				if (isWithin(served, absSsrBuildDir)) {
-					throw new PhotonError(
-						"E_PHOTON_INVALID_CONFIG",
+					throw new E_PHOTON_INVALID_CONFIG(
 						`ssrBuildDir must not be inside ${path.relative(projectRoot, served)} — the static server would hand the server bundle to anyone who asks`,
 						{
-							hint: "Build the SSR entry to a directory nothing serves, such as build/ssr.",
+							help: "Build the SSR entry to a directory nothing serves, such as build/ssr.",
 						},
 					);
 				}
 			}
 			if (!isAssetsUrl(this.#assetsUrl())) {
-				throw new PhotonError(
-					"E_PHOTON_INVALID_CONFIG",
+				throw new E_PHOTON_INVALID_CONFIG(
 					"assetsUrl must be a root-relative path or an http(s) URL",
 				);
 			}
@@ -462,8 +465,7 @@ export class PhotonRenderer {
 				(!entryPattern.test(this.#ssrEntrypoint()) ||
 					this.#ssrEntrypoint().split("/").includes(".."))
 			) {
-				throw new PhotonError(
-					"E_PHOTON_INVALID_CONFIG",
+				throw new E_PHOTON_INVALID_CONFIG(
 					"ssr.entrypoint path is invalid or contains path traversal",
 				);
 			}
@@ -471,8 +473,7 @@ export class PhotonRenderer {
 				!entryPattern.test(this.#config.entryClient) ||
 				this.#config.entryClient.split("/").includes("..")
 			) {
-				throw new PhotonError(
-					"E_PHOTON_INVALID_CONFIG",
+				throw new E_PHOTON_INVALID_CONFIG(
 					"entryClient path is invalid or contains path traversal",
 				);
 			}
@@ -500,11 +501,10 @@ export class PhotonRenderer {
 				}
 			}
 			if (manifestPath === undefined) {
-				throw new PhotonError(
-					"E_PHOTON_MANIFEST_MISSING",
+				throw new E_PHOTON_MANIFEST_MISSING(
 					`Vite manifest not accessible at ${manifestCandidates.join(" or ")}.`,
 					{
-						hint: "Run `pnpm build` (or your project's build script) and verify your deployment ships the build output. If the file exists but the process can't read it, check filesystem permissions on the build directory.",
+						help: "Run `pnpm build` (or your project's build script) and verify your deployment ships the build output. If the file exists but the process can't read it, check filesystem permissions on the build directory.",
 						context: { manifestCandidates, buildDir: absBuildDir },
 						cause: lastAccessErr,
 					},
@@ -524,43 +524,40 @@ export class PhotonRenderer {
 			try {
 				manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 			} catch (manifestErr) {
-				throw new PhotonError(
-					"E_PHOTON_MANIFEST_INVALID",
+				throw new E_PHOTON_MANIFEST_INVALID(
 					`Vite manifest at ${manifestPath} could not be read or parsed`,
 					{
-						hint: "Rebuild the client and redeploy the whole build directory.",
+						help: "Rebuild the client and redeploy the whole build directory.",
 						context: { manifestPath },
 						cause: manifestErr,
 					},
 				);
 			}
 			if (!isManifest(manifest)) {
-				throw new PhotonError(
-					"E_PHOTON_MANIFEST_INVALID",
+				throw new E_PHOTON_MANIFEST_INVALID(
 					`Vite manifest at ${manifestPath} is not a manifest object`,
 					{
-						hint: "Rebuild the client and redeploy the whole build directory.",
+						help: "Rebuild the client and redeploy the whole build directory.",
 						context: { manifestPath },
 					},
 				);
 			}
 			this.#manifest = manifest;
 		} catch (err) {
-			// Re-throw structured PhotonError instances unchanged so callers
+			// Re-throw structured Photon errors unchanged so callers
 			// see the precise code (E_PHOTON_INVALID_CONFIG /
 			// E_PHOTON_MANIFEST_MISSING) instead of every prod-boot failure
 			// collapsing into E_PHOTON_SSR_LOAD_FAILED.
 			// Cross-realm fallback: if a duplicated `@c9up/photon` copy in the
 			// SSR bundle (workspace dep duplication, worker thread, vm context)
-			// throws its own PhotonError, the `instanceof` check fails despite
+			// throws its own Photon error, the `instanceof` check fails despite
 			// the same shape — duck-type on the prefixed `code` field as a
 			// belt-and-suspenders second guard.
-			if (err instanceof PhotonError || isPhotonErrorShaped(err)) throw err;
-			throw new PhotonError(
-				"E_PHOTON_SSR_LOAD_FAILED",
+			if (isPhotonError(err) || isPhotonErrorShaped(err)) throw err;
+			throw new E_PHOTON_SSR_LOAD_FAILED(
 				`Failed to load SSR module: ${err instanceof Error ? err.message : String(err)}`,
 				{
-					hint: "Run `ream build` first to generate the SSR bundle.",
+					help: "Run `ream build` first to generate the SSR bundle.",
 					cause: err,
 				},
 			);
@@ -694,21 +691,16 @@ export class PhotonRenderer {
 				output = await this.#ssrModule.render(page);
 			} catch (err) {
 				// Photon's own failure (the entry cannot be loaded) keeps its code.
-				if (err instanceof PhotonError) throw err;
+				if (isPhotonError(err)) throw err;
 				// Log the real error internally, give generic message to callers
-				throw new PhotonError(
-					"E_PHOTON_SSR_RENDER_FAILED",
-					"Server-side rendering failed",
-					{
-						hint: err instanceof Error ? err.message : String(err),
-						cause: err,
-					},
-				);
+				throw new E_PHOTON_SSR_RENDER_FAILED("Server-side rendering failed", {
+					help: err instanceof Error ? err.message : String(err),
+					cause: err,
+				});
 			}
 			ssr = readSsrOutput(output);
 			if (ssr === undefined) {
-				throw new PhotonError(
-					"E_PHOTON_SSR_RENDER_FAILED",
+				throw new E_PHOTON_SSR_RENDER_FAILED(
 					"SSR module returned neither a string nor { head, body }",
 				);
 			}
@@ -778,11 +770,10 @@ export class PhotonRenderer {
 				? Reflect.get(view, "render")
 				: undefined;
 		if (typeof render !== "function") {
-			throw new PhotonError(
-				"E_PHOTON_INVALID_CONFIG",
+			throw new E_PHOTON_INVALID_CONFIG(
 				`rootView names the template "${chosen}", but the request has no view engine to render it`,
 				{
-					hint: "Install a view engine that sets ctx.view (@c9up/inker does), or make rootView return a function that writes the document.",
+					help: "Install a view engine that sets ctx.view (@c9up/inker does), or make rootView return a function that writes the document.",
 				},
 			);
 		}
@@ -971,9 +962,9 @@ function escapeAttr(str: string): string {
 }
 
 /**
- * Duck-type guard for cross-realm `PhotonError` instances. When the SSR
+ * Duck-type guard for cross-realm Photon errors. When the SSR
  * bundle dynamic-imports a duplicated `@c9up/photon` (workspace dep dup,
- * worker thread, vm context), `instanceof PhotonError` returns false despite
+ * worker thread, vm context), `instanceof` returns false despite
  * matching shape. The prefixed `PHOTON_*` `code` field is the durable marker.
  */
 function isPhotonErrorShaped(err: unknown): boolean {
@@ -1014,8 +1005,7 @@ function resolveSubdirectory(
 ): string {
 	const abs = path.resolve(projectRoot, dir);
 	if (!isWithin(projectRoot, abs)) {
-		throw new PhotonError(
-			"E_PHOTON_INVALID_CONFIG",
+		throw new E_PHOTON_INVALID_CONFIG(
 			`${option} must be a subdirectory of the project root`,
 		);
 	}
@@ -1102,11 +1092,10 @@ async function loadSsrModule(
 	}
 
 	if (lastImportError !== undefined) {
-		throw new PhotonError(
-			"E_PHOTON_SSR_LOAD_FAILED",
+		throw new E_PHOTON_SSR_LOAD_FAILED(
 			"SSR module exists but threw while importing",
 			{
-				hint:
+				help:
 					lastImportError instanceof Error
 						? lastImportError.message
 						: String(lastImportError),
@@ -1116,8 +1105,7 @@ async function loadSsrModule(
 		);
 	}
 
-	throw new PhotonError(
-		"E_PHOTON_SSR_LOAD_FAILED",
+	throw new E_PHOTON_SSR_LOAD_FAILED(
 		"SSR module not found or missing render() export",
 		{ context: { candidates } },
 	);

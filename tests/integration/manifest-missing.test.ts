@@ -2,8 +2,8 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PhotonError } from "../../src/errors.js";
 import { type PhotonConfig, PhotonRenderer } from "../../src/PhotonRenderer.js";
+import { isPhotonError, type PhotonError } from "../../src/photonError.js";
 
 const baseConfig: PhotonConfig = {
 	framework: "react",
@@ -25,9 +25,9 @@ async function expectPhotonError(
 		() => null,
 		(e: unknown) => e,
 	);
-	if (!(err instanceof PhotonError)) {
+	if (!isPhotonError(err)) {
 		const detail = err === null ? "no throw (resolved)" : String(err);
-		throw new Error(`${context}: expected PhotonError, got ${detail}`);
+		throw new Error(`${context}: expected a Photon error, got ${detail}`);
 	}
 	return err;
 }

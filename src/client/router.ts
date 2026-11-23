@@ -19,6 +19,10 @@
 import { readMetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { applyMetaToDom } from "./applyMeta.js";
+import {
+	E_PHOTON_INVALID_PAGE_RESPONSE,
+	E_PHOTON_NO_ROUTER_HOST,
+} from "./errors.js";
 import { isPhotonState, readHistoryState, toHistoryState } from "./history.js";
 import { currentHost, type PhotonEvent, type PhotonHost } from "./host.js";
 import type {
@@ -197,7 +201,9 @@ export function bootRouter(options: BootRouterOptions): void {
 function host(): PhotonHost {
 	const platform = currentHost();
 	if (platform === undefined) {
-		throw new Error("[photon] the client router has no host to run on");
+		throw new E_PHOTON_NO_ROUTER_HOST(
+			"[photon] the client router has no host to run on",
+		);
 	}
 	return platform;
 }
@@ -330,7 +336,7 @@ export async function requestPage(url: string): Promise<unknown> {
 	});
 	const type = response.headers.get("content-type") ?? "";
 	if (!response.ok || !type.toLowerCase().includes("application/json")) {
-		throw new Error(
+		throw new E_PHOTON_INVALID_PAGE_RESPONSE(
 			`[photon] the first page at ${url} answered HTTP ${response.status} (${type || "no content type"}), not a page object`,
 		);
 	}

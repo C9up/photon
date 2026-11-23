@@ -1,105 +1,47 @@
 /**
- * PhotonError — structured error for the Photon SSR / renderer surface.
- *
- * Mirrors the shape of `PhotonClientError` (browser side, `./client/errors.ts`):
- * narrowed `code` literal union + optional `hint` / `cause` / `context` +
- * a `docsUrl` getter that resolves to the matching anchor in the published
- * error catalog.
+ * The server-side errors of Photon, one class per code. A caller tests
+ * `error.code` or `error instanceof errors.E_PHOTON_…`. Each carries `help`,
+ * `context` and a `docsUrl` (see `photonError.ts`).
  */
 
-/**
- * Every server-side error code Photon can throw. New codes are added here
- * AND in `docs/{en,fr}/errors/index.md` — the integration grep test in
- * `tests/integration/error-catalog.test.ts` enforces source ↔ docs parity.
- */
-export type PhotonErrorCode =
-	| "E_PHOTON_INVALID_CONFIG"
-	| "E_PHOTON_SSR_LOAD_FAILED"
-	| "E_PHOTON_SSR_RENDER_FAILED"
-	| "E_PHOTON_MANIFEST_MISSING"
-	| "E_PHOTON_MANIFEST_INVALID";
+import { photonErrorClass } from "./photonError.js";
 
-/**
- * Where the framework's documentation is served. The `docsUrl` getter appends
- * `/en/reference/errors#<anchor>`, the anchor being the code in lower case with
- * `-` for `_` (`E_PHOTON_INVALID_CONFIG` → `#e-photon-invalid-config`), as the
- * error index slugs its headings and as `@c9up/ream` builds its own links.
- *
- * NOTE: `client/errors.ts` redeclares this constant verbatim so the browser
- * bundle never imports the server module. The two values MUST stay in sync —
- * `tests/unit/docs-base-url-parity.test.ts` enforces this.
- */
-export const PHOTON_DOCS_BASE_URL = "https://reamjs.com";
+/** `config/photon.ts`, or a value given to Photon, cannot be used. */
+export const E_PHOTON_INVALID_CONFIG = photonErrorClass(
+	"E_PHOTON_INVALID_CONFIG",
+);
 
-function codeToAnchor(code: PhotonErrorCode): string {
-	return code.toLowerCase().replace(/_/g, "-");
-}
+/** The SSR bundle could not be loaded. */
+export const E_PHOTON_SSR_LOAD_FAILED = photonErrorClass(
+	"E_PHOTON_SSR_LOAD_FAILED",
+);
 
-/**
- * Walk an `Error.cause` chain and produce a JSON-friendly representation.
- * Unknown shapes (non-Error throws like raw strings or plain objects) are
- * preserved as-is so log shippers see exactly what was thrown.
- *
- * Bounded depth — defensive against pathological self-referential causes.
- */
-function serializeCause(cause: unknown, depth = 0): unknown {
-	if (cause === undefined) return undefined;
-	if (depth > 5) return "[Photon: cause chain truncated at depth 5]";
-	if (cause instanceof PhotonError) return cause.toJSON();
-	if (cause instanceof Error) {
-		return {
-			name: cause.name,
-			message: cause.message,
-			cause: serializeCause(cause.cause, depth + 1),
-		};
-	}
-	return cause;
-}
+/** The SSR bundle failed to render a page. */
+export const E_PHOTON_SSR_RENDER_FAILED = photonErrorClass(
+	"E_PHOTON_SSR_RENDER_FAILED",
+);
 
-export class PhotonError extends Error {
-	readonly code: PhotonErrorCode;
-	readonly hint?: string;
-	readonly context?: Record<string, unknown>;
-	readonly docsUrl: string;
+/** The build manifest is missing. */
+export const E_PHOTON_MANIFEST_MISSING = photonErrorClass(
+	"E_PHOTON_MANIFEST_MISSING",
+);
 
-	constructor(
-		code: PhotonErrorCode,
-		message: string,
-		options?: {
-			hint?: string;
-			cause?: unknown;
-			context?: Record<string, unknown>;
-		},
-	) {
-		super(
-			message,
-			options?.cause !== undefined ? { cause: options.cause } : undefined,
-		);
-		this.name = "PhotonError";
-		this.code = code;
-		this.hint = options?.hint;
-		this.context = options?.context;
-		this.docsUrl = `${PHOTON_DOCS_BASE_URL}/en/reference/errors#${codeToAnchor(code)}`;
-	}
+/** The build manifest does not parse, or lacks an entry. */
+export const E_PHOTON_MANIFEST_INVALID = photonErrorClass(
+	"E_PHOTON_MANIFEST_INVALID",
+);
 
-	/**
-	 * JSON-serializable view of the error — invoked by `JSON.stringify`. Adds
-	 * `name` + `message` (which are non-enumerable on `Error` subclasses and
-	 * would otherwise be dropped) and walks the `cause` chain so log shippers
-	 * see the full failure context without per-pipeline glue. Adonis's
-	 * `Exception` follows the same self-describing-on-serialize pattern.
-	 */
-	toJSON(): Record<string, unknown> {
-		const out: Record<string, unknown> = {
-			name: this.name,
-			code: this.code,
-			message: this.message,
-			docsUrl: this.docsUrl,
-		};
-		if (this.hint !== undefined) out.hint = this.hint;
-		if (this.context !== undefined) out.context = this.context;
-		const cause = serializeCause(this.cause);
-		if (cause !== undefined) out.cause = cause;
-		return out;
-	}
-}
+/** `config/photon.ts` is missing. */
+export const E_PHOTON_MISSING_CONFIG = photonErrorClass(
+	"E_PHOTON_MISSING_CONFIG",
+);
+
+/** A duration does not parse. */
+export const E_PHOTON_INVALID_DURATION = photonErrorClass(
+	"E_PHOTON_INVALID_DURATION",
+);
+
+/** An infinite-scroll prop has no cursor to page from. */
+export const E_PHOTON_SCROLL_CURSOR_UNDERIVABLE = photonErrorClass(
+	"E_PHOTON_SCROLL_CURSOR_UNDERIVABLE",
+);
