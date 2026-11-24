@@ -23,6 +23,7 @@ import { Link as ReactLink } from "../../../src/client/react/index.js";
 import { bootRouter } from "../../../src/client/router.js";
 import { setRoutes } from "../../../src/client/routes.js";
 import { Link as VueLink } from "../../../src/client/vue/index.js";
+import { servedPath } from "./support/served-path.js";
 
 beforeAll(() => {
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -39,7 +40,7 @@ beforeEach(() => {
 				JSON.stringify({
 					component: "Page",
 					framework: "react",
-					url,
+					url: servedPath(url),
 					props: {},
 				}),
 				{ headers: { "content-type": "application/json" } },
@@ -106,7 +107,9 @@ describe.each([
 		anchor?.click();
 		await act(settle);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(fetchMock.mock.calls[0]?.[0]).toBe("/search?q=tea");
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(
+			"http://localhost:3000/search?q=tea",
+		);
 	});
 
 	it("is a button for a mutation, which sends its data in the body", async () => {
@@ -142,7 +145,7 @@ describe.each([
 		update?.click();
 		await act(settle);
 		const init: RequestInit | undefined = fetchMock.mock.calls[0]?.[1];
-		expect(fetchMock.mock.calls[0]?.[0]).toBe("/users/3");
+		expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:3000/users/3");
 		expect(init?.method).toBe("PUT");
 	});
 

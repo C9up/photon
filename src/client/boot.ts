@@ -23,6 +23,7 @@ import type { PhotonPageData } from "./hydrate.js";
 import {
 	announceFlash,
 	bootRouter,
+	pathOf,
 	primeCurrentPage,
 	type ResolveComponent,
 	readDeferredProps,
@@ -41,6 +42,17 @@ import {
 const hydratedTargets = new WeakSet<Element>();
 
 const PHOTON_DATA_ELEMENT_ID = "photon-data";
+
+/**
+ * Where the page object is read from: a JSON script, never any element with
+ * the id. `getElementById` returns the first element of the document with that
+ * id, whatever it is, so markup the page prints (a sanitized comment keeping
+ * its `id`) could stand in for the page object — component, props, url and
+ * history flags. Only a `<script type="application/json">` matches this, and
+ * the server writes it before the mount element, so nothing the application
+ * renders comes first.
+ */
+const PHOTON_DATA_SELECTOR = `script#${PHOTON_DATA_ELEMENT_ID}[type="application/json"]`;
 
 export interface BootPageOptions {
 	/** CSS selector for the mount target, in a browser. */
@@ -97,6 +109,12 @@ export async function bootPage(options: BootPageOptions): Promise<void> {
 	// overwrites belonged to this very page. Read before the key can be
 	// cleared below, and before the first render, which may restore it.
 	const platform = currentHost();
+	// The page's `url` is where deferred props and reloads are asked from. One
+	// that resolves to another origin (a request path the server echoed back as
+	// `//other.example/x`) gives way to the address the page was loaded at.
+	if (platform !== undefined && !isOnCurrentOrigin(pageData.url, platform)) {
+		pageData.url = pathOf(new URL(platform.href()));
+	}
 	if (platform !== undefined) {
 		const previous: unknown = await readHistoryState(platform.state());
 		const remembered = rememberedStateOf(previous, pageData);
@@ -143,15 +161,29 @@ export async function bootPage(options: BootPageOptions): Promise<void> {
 	options.onHydrated?.();
 }
 
-/** Locate and parse the `<script id="photon-data">` block. */
+/** Whether `url`, resolved against the current address, stays on its origin over http(s). */
+function isOnCurrentOrigin(url: string, platform: PhotonHost): boolean {
+	try {
+		const here = new URL(platform.href());
+		const resolved = new URL(url, here);
+		return (
+			resolved.origin === here.origin &&
+			(resolved.protocol === "http:" || resolved.protocol === "https:")
+		);
+	} catch {
+		return false;
+	}
+}
+
+/** Locate and parse the `<script type="application/json" id="photon-data">` block. */
 function readPageData(): PhotonPageData {
 	const el =
 		typeof document !== "undefined"
-			? document.getElementById(PHOTON_DATA_ELEMENT_ID)
+			? document.querySelector(PHOTON_DATA_SELECTOR)
 			: null;
 	if (!el) {
 		throw new E_PHOTON_HYDRATION_NO_DATA(
-			`Missing <script id="${PHOTON_DATA_ELEMENT_ID}"> in the document.`,
+			`Missing <script type="application/json" id="${PHOTON_DATA_ELEMENT_ID}"> in the document.`,
 			{
 				help: "Render the page through PhotonRenderer.render() — the script block is emitted automatically.",
 			},

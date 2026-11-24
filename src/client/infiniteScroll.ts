@@ -34,6 +34,7 @@ import type { PhotonPageData, ScrollPropMeta } from "./hydrate.js";
 import {
 	getCurrentPage,
 	type PartialRequest,
+	pathOf,
 	reloadCurrentPage,
 	router,
 } from "./router.js";
@@ -588,7 +589,7 @@ function useInfiniteScrollQueryString(options: QueryStringOptions): {
 		const url = new URL(current.url, window.location.href);
 		if (page === "1") url.searchParams.delete(options.getPageName());
 		else url.searchParams.set(options.getPageName(), page);
-		const next = url.pathname + url.search + url.hash;
+		const next = pathOf(url);
 		if (next !== current.url) router.replace({ url: next });
 	};
 

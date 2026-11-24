@@ -16,6 +16,7 @@ import {
 	setRoutes,
 	urlFor,
 } from "../../../src/client/routes.js";
+import { servedPath } from "./support/served-path.js";
 
 beforeEach(() => {
 	setRoutes({
@@ -82,7 +83,7 @@ describe("photon/client > named routes", () => {
 					JSON.stringify({
 						component: "User",
 						framework: "react",
-						url,
+						url: servedPath(url),
 						props: {},
 					}),
 					{ headers: { "content-type": "application/json" } },
@@ -107,10 +108,10 @@ describe("photon/client > named routes", () => {
 			{ x: 1 },
 		);
 
-		expect(fetchMock.mock.calls[0]?.[0]).toBe("/users/7");
+		expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:3000/users/7");
 		expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT");
 		expect(fetchMock.mock.calls[0]?.[1]?.body).toBe('{"name":"Ada"}');
-		expect(fetchMock.mock.calls[1]?.[0]).toBe("/users/8");
+		expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:3000/users/8");
 		expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
 	});
 });

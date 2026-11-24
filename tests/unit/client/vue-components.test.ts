@@ -26,6 +26,7 @@ import {
 	PhotonPage,
 	usePage as readPage,
 } from "../../../src/client/vue/index.js";
+import { servedPath } from "./support/served-path.js";
 
 function jsonPage(page: Record<string, unknown>): Response {
 	return new Response(JSON.stringify({ framework: "vue", ...page }), {
@@ -80,7 +81,7 @@ describe("photon/vue > usePage", () => {
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async (url: string) =>
-				jsonPage({ component: "Home", url, props: {} }),
+				jsonPage({ component: "Home", url: servedPath(url), props: {} }),
 			),
 		);
 		const target = mountPage(Url, {

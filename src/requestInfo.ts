@@ -66,6 +66,10 @@ export function readRequestMethod(ctx: unknown): string {
  * the query; otherwise `path()` plus the raw query the host keeps beside it.
  */
 export function readRequestUrl(ctx: unknown): string {
+	return onThisHost(readRawRequestUrl(ctx));
+}
+
+function readRawRequestUrl(ctx: unknown): string {
 	const req = Reflect.get(Object(ctx), "request");
 	if (typeof req !== "object" || req === null) return "/";
 	const url = Reflect.get(req, "url");
@@ -79,6 +83,34 @@ export function readRequestUrl(ctx: unknown): string {
 	if (pathname === undefined) return "/";
 	const query = readRawQuery(req);
 	return query === "" ? pathname : `${pathname}?${query}`;
+}
+
+/**
+ * The request URL as a path a browser resolves on this host.
+ *
+ * A raw request path may start with `//` or `/\` (`GET //evil.example/x`
+ * reaches a catch-all route as it arrived). Written as is into the page's
+ * `url` or a `409` location, a browser reads it as another host: the client
+ * would ask that host for deferred props, or navigate there. Upstream echoes
+ * the path unchanged; here a `/.` in front keeps the same path on the same
+ * origin (`/.//evil.example/x` resolves to the path `//evil.example/x`).
+ */
+function onThisHost(url: string): string {
+	if (resolvesOnBase(url)) return url;
+	return url.startsWith("/") ? `/.${url}` : `/${url}`;
+}
+
+/** Whether `url` resolves on whatever host it is read against. */
+function resolvesOnBase(url: string): boolean {
+	try {
+		return (
+			new URL(url, "http://photon.invalid").host === "photon.invalid" &&
+			new URL(url, "http://photon-other.invalid").host ===
+				"photon-other.invalid"
+		);
+	} catch {
+		return false;
+	}
 }
 
 /** A non-empty string a host exposes as a property or a no-arg method. */

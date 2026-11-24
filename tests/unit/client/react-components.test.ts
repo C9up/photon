@@ -19,6 +19,7 @@ import {
 	usePage,
 } from "../../../src/client/react/index.js";
 import { bootRouter, router } from "../../../src/client/router.js";
+import { servedPath } from "./support/served-path.js";
 
 beforeAll(() => {
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -76,7 +77,7 @@ describe("photon/react > usePage", () => {
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async (url: string) =>
-				jsonPage({ component: "Home", url, props: {} }),
+				jsonPage({ component: "Home", url: servedPath(url), props: {} }),
 			),
 		);
 		const target = await mountPage(Url, {

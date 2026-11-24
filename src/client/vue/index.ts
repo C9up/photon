@@ -823,7 +823,7 @@ export const Link = defineComponent(
 type FormFields = Record<string, unknown>;
 
 /** The state and methods a Vue form carries beside its fields. */
-export interface InertiaFormExtras<T extends FormFields>
+export interface PhotonFormExtras<T extends FormFields>
 	extends Omit<
 		FormStore<T>,
 		"getSnapshot" | "subscribe" | "dispose" | "setData" | "transform"
@@ -833,7 +833,7 @@ export interface InertiaFormExtras<T extends FormFields>
 	/** What the data becomes when it is sent; returns the form to chain. */
 	transform(
 		callback: (data: T) => Record<string, unknown> | FormData,
-	): InertiaForm<T>;
+	): PhotonForm<T>;
 	readonly errors: FormErrors;
 	readonly hasErrors: boolean;
 	readonly processing: boolean;
@@ -844,7 +844,7 @@ export interface InertiaFormExtras<T extends FormFields>
 }
 
 /** The form: its fields at the top level (`form.email`, `v-model="form.email"`). */
-export type InertiaForm<T extends FormFields> = T & InertiaFormExtras<T>;
+export type PhotonForm<T extends FormFields> = T & PhotonFormExtras<T>;
 
 /**
  * A form's fields, errors and submission state — `useForm` from
@@ -854,15 +854,15 @@ export type InertiaForm<T extends FormFields> = T & InertiaFormExtras<T>;
  */
 export function useForm<T extends FormFields>(
 	data: T | (() => T),
-): InertiaForm<T>;
+): PhotonForm<T>;
 export function useForm<T extends FormFields>(
 	rememberKey: string,
 	data: T | (() => T),
-): InertiaForm<T>;
+): PhotonForm<T>;
 export function useForm<T extends FormFields>(
 	keyOrData: string | T | (() => T),
 	maybeData?: T | (() => T),
-): InertiaForm<T> {
+): PhotonForm<T> {
 	let store: FormStore<T>;
 	if (typeof keyOrData === "string") {
 		if (maybeData === undefined) {
@@ -886,7 +886,7 @@ export function useForm<T extends FormFields>(
 		return store.getSnapshot();
 	};
 
-	const extras: InertiaFormExtras<T> = {
+	const extras: PhotonFormExtras<T> = {
 		data: () => read().data,
 		transform(callback) {
 			store.transform(callback);
@@ -940,7 +940,7 @@ export function useForm<T extends FormFields>(
 	for (const key of stateKeys) {
 		descriptors[key] = { enumerable: true, get: () => read()[key] };
 	}
-	const form: InertiaForm<T> = Object.defineProperties(
+	const form: PhotonForm<T> = Object.defineProperties(
 		Object.assign({}, store.getSnapshot().data, extras),
 		descriptors,
 	);

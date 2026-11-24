@@ -719,8 +719,10 @@ export class PhotonRenderer {
 		);
 
 		const head = `${headTags ? `${headTags}\n  ` : ""}${ssr && ssr.head.length > 0 ? `${ssr.head.join("\n  ")}\n  ` : ""}${assets.css.map((href) => `<link rel="stylesheet" href="${escapeAttr(href)}">`).join("\n  ")}`;
-		const body = `<div id="app"${ssr ? ' data-server-rendered="true"' : ""}>${ssr?.body ?? ""}</div>
-  <script${nonceAttr} type="application/json" id="photon-data">${escapeScriptJson(pageDataJson)}</script>
+		// The page object comes BEFORE the mount element, as upstream writes it:
+		// nothing the application renders can precede it in the document.
+		const body = `<script${nonceAttr} type="application/json" id="photon-data">${escapeScriptJson(pageDataJson)}</script>
+  <div id="app"${ssr ? ' data-server-rendered="true"' : ""}>${ssr?.body ?? ""}</div>
   ${assets.js.map((src) => `<script${nonceAttr} type="module" src="${escapeAttr(src)}"></script>`).join("\n  ")}`;
 
 		const html = await this.#renderRootView(

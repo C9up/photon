@@ -125,9 +125,6 @@ export interface PhotonMiddlewareContext {
 	};
 }
 
-/** Backward-compatible alias (historical typo). */
-export type PhotronMiddlewareContext = PhotonMiddlewareContext;
-
 /**
  * Seed the per-request meta accumulator from a route handler's `@Meta()`
  * decorator, when the upstream router populated `ctx.route`.

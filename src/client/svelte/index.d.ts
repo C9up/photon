@@ -168,13 +168,13 @@ export declare const Link: Component<{
 type FormFields = Record<string, unknown>;
 
 /** The state and methods a Svelte form carries beside its fields. */
-export interface InertiaFormExtras<T extends FormFields>
+export interface PhotonFormExtras<T extends FormFields>
 	extends Omit<
 		FormStore<T>,
 		"getSnapshot" | "subscribe" | "dispose" | "setData" | "transform"
 	> {
 	data(): T;
-	transform(callback: (data: T) => Record<string, unknown> | FormData): InertiaForm<T>;
+	transform(callback: (data: T) => Record<string, unknown> | FormData): PhotonForm<T>;
 	readonly errors: FormErrors;
 	readonly hasErrors: boolean;
 	readonly processing: boolean;
@@ -185,13 +185,13 @@ export interface InertiaFormExtras<T extends FormFields>
 }
 
 /** The form: its fields at the top level (`bind:value={form.email}`). */
-export type InertiaForm<T extends FormFields> = T & InertiaFormExtras<T>;
+export type PhotonForm<T extends FormFields> = T & PhotonFormExtras<T>;
 
-export declare function useForm<T extends FormFields>(data: T | (() => T)): InertiaForm<T>;
+export declare function useForm<T extends FormFields>(data: T | (() => T)): PhotonForm<T>;
 export declare function useForm<T extends FormFields>(
 	rememberKey: string,
 	data: T | (() => T),
-): InertiaForm<T>;
+): PhotonForm<T>;
 
 /** A form the router submits; its children get the form's state and methods. */
 export declare const Form: Component<

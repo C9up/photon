@@ -20,6 +20,7 @@ import { readMetaTags } from "../seo/Meta.js";
 import type { PhotonAdapterHandle } from "./adapters/types.js";
 import { applyMetaToDom } from "./applyMeta.js";
 import {
+	E_PHOTON_DEFERRED_PROPS_MISSING,
 	E_PHOTON_INVALID_PAGE_RESPONSE,
 	E_PHOTON_NO_ROUTER_HOST,
 } from "./errors.js";
@@ -160,6 +161,17 @@ let listenersInstalled = false;
  */
 let navigationSeq = 0;
 
+/**
+ * The deferred props already asked for on the visit numbered `seq`. A group is
+ * asked for once per visit: an answer that announced the same group again
+ * without its props made the router ask for it again, with no end. A named
+ * deviation: `@inertiajs/core` queues the groups of every answer again.
+ */
+let deferredRequested: { seq: number; props: Set<string> } = {
+	seq: -1,
+	props: new Set(),
+};
+
 /** Soft cap on `history.pushState` state size. Firefox enforces ~640KB hard. */
 const STATE_SIZE_WARN_THRESHOLD = 100_000;
 
@@ -175,6 +187,8 @@ export function bootRouter(options: BootRouterOptions): void {
 	activeOptions = options;
 	currentVersion = options.page?.version;
 	setCurrentPage(options.page);
+	// A booted page is a visit of its own, even under the same counter.
+	deferredRequested = { seq: navigationSeq, props: new Set() };
 	if (options.page !== undefined) loadDeferredProps(options.page, options);
 
 	if (listenersInstalled) return;
@@ -233,7 +247,10 @@ async function handleClick(
 	if (!isInterceptableUrl(url, anchor)) return;
 
 	event.preventDefault();
-	await navigate(url.pathname + url.search + url.hash, options);
+	// The absolute address, never its path alone: a same-origin URL whose path
+	// starts with `//` (`/.//other.example/x`) is read as another host once
+	// its origin is dropped.
+	await navigate(url.href, options);
 }
 
 function shouldInterceptClick(event: MouseEvent): boolean {
@@ -290,17 +307,34 @@ function resolveUrl(href: string): URL | null {
  * non-http(s) protocols.
  */
 function isSafeNavigationUrl(url: string): boolean {
-	const platform = currentHost();
-	if (platform === undefined) return true; // SSR; trust it
+	if (currentHost() === undefined) return true; // SSR; trust it
+	return sameOriginUrl(url) !== null;
+}
+
+/**
+ * `url` resolved against the current address, when it stays on this origin
+ * over http(s); null otherwise. What the router requests and falls back to is
+ * this absolute URL, never a path cut out of it: `new URL("/.//evil.example/x",
+ * origin)` is on the origin, but its path `//evil.example/x`, handed back to
+ * `fetch()` or `location.href`, names another host.
+ */
+function sameOriginUrl(url: string): URL | null {
 	try {
-		const resolved = new URL(url, platform.href());
-		if (resolved.origin !== currentOrigin()) return false;
-		if (resolved.protocol !== "http:" && resolved.protocol !== "https:")
-			return false;
-		return true;
+		const resolved = new URL(url, host().href());
+		if (resolved.protocol !== "http:" && resolved.protocol !== "https:") {
+			return null;
+		}
+		return resolved.origin === currentOrigin() ? resolved : null;
 	} catch {
-		return false;
+		return null;
 	}
+}
+
+/** The absolute href of `url` without its fragment, which no request carries. */
+function requestHref(url: URL): string {
+	const copy = new URL(url.href);
+	copy.hash = "";
+	return copy.href;
 }
 
 async function navigate(
@@ -349,13 +383,22 @@ async function fetchAndApply(
 	options: BootRouterOptions,
 	visitOptions: VisitOptions,
 ): Promise<boolean> {
+	// Checked here, right before the request, whatever path the URL came by.
+	const target = sameOriginUrl(targetPath);
+	if (target === null) {
+		console.error(
+			`[photon] visit to '${targetPath}' refused: it does not stay on this origin.`,
+		);
+		return false;
+	}
+	const requestUrl = requestHref(target);
 	const ownSeq = ++navigationSeq;
 	const controller = new AbortController();
 	const method = visitOptions.method ?? "get";
 	// A mutation that fails must not be replayed as a GET of its URL, which is
 	// what the full-reload fallback would do: it stays on the page instead.
-	const fallback = (url: string): void => {
-		if (method === "get") fallbackToFullReload(url);
+	const fallback = (): void => {
+		if (method === "get") fallbackToFullReload(target.href);
 	};
 	const data = visitOptions.data;
 	const body =
@@ -371,7 +414,7 @@ async function fetchAndApply(
 	try {
 		visitOptions.onStart?.({ url: targetPath });
 		visitOptions.onCancelToken?.({ cancel: () => controller.abort() });
-		response = await host().fetch(targetPath, {
+		response = await host().fetch(requestUrl, {
 			signal: controller.signal,
 			method: method.toUpperCase(),
 			...(body !== undefined ? { body } : {}),
@@ -380,7 +423,7 @@ async function fetchAndApply(
 				...(typeof body === "string"
 					? { "content-type": "application/json" }
 					: {}),
-				...(method !== "get" ? xsrfHeader(targetPath) : {}),
+				...(method !== "get" ? xsrfHeader(requestUrl) : {}),
 				...exceptOnceHeader(),
 				[PHOTON_HEADER]: "true",
 				...(visitOptions.errorBag !== undefined && visitOptions.errorBag !== ""
@@ -405,7 +448,7 @@ async function fetchAndApply(
 			"[photon] SPA-nav fetch failed; falling back to full reload.",
 			err,
 		);
-		fallback(targetPath);
+		fallback();
 		return false;
 	}
 
@@ -417,9 +460,9 @@ async function fetchAndApply(
 	// used to be read as any other failure, so an external `location()` reloaded
 	// the page the user was leaving instead of going where the server said.
 	if (response.status === 409) {
-		const target = response.headers.get(LOCATION_HEADER);
+		const location = response.headers.get(LOCATION_HEADER);
 		fallbackToFullReload(
-			target !== null && isHttpUrl(target) ? target : targetPath,
+			location !== null && isHttpUrl(location) ? location : target.href,
 		);
 		return false;
 	}
@@ -428,7 +471,7 @@ async function fetchAndApply(
 		console.error(
 			`[photon] SPA-nav returned HTTP ${response.status}; falling back to full reload.`,
 		);
-		fallback(targetPath);
+		fallback();
 		return false;
 	}
 
@@ -436,7 +479,7 @@ async function fetchAndApply(
 	if (!contentType.toLowerCase().includes("application/json")) {
 		// Server returned a full SSR page (or something else). Full reload preserves
 		// the user's intent without trying to interpret HTML as page-data.
-		fallback(targetPath);
+		fallback();
 		return false;
 	}
 
@@ -448,7 +491,7 @@ async function fetchAndApply(
 			"[photon] SPA-nav JSON parse failed; falling back to full reload.",
 			err,
 		);
-		fallback(targetPath);
+		fallback();
 		return false;
 	}
 
@@ -458,7 +501,7 @@ async function fetchAndApply(
 
 	const parsed = parsePageData(payload);
 	if (!parsed) {
-		fallback(targetPath);
+		fallback();
 		return false;
 	}
 	const newPageData = withOnceProps(parsed);
@@ -584,16 +627,24 @@ async function applyPageData(
  * `defer()` sends the NAME of a prop and not its value; the value only ever
  * arrives through this request. The router never made it, so a deferred panel
  * stayed empty forever. Only the props not already held are asked for: a page
- * restored from history may carry some groups already.
+ * restored from history may carry some groups already, and a prop already
+ * asked for on this visit is not asked for again.
  */
 function loadDeferredProps(
 	page: PhotonPageData,
 	options: BootRouterOptions,
 ): void {
 	const seq = navigationSeq;
+	if (deferredRequested.seq !== seq) {
+		deferredRequested = { seq, props: new Set() };
+	}
+	const requested = deferredRequested.props;
 	for (const props of Object.values(page.deferredProps ?? {})) {
-		const missing = props.filter((name) => !(name in page.props));
+		const missing = props.filter(
+			(name) => !(name in page.props) && !requested.has(name),
+		);
 		if (missing.length > 0) {
+			for (const name of missing) requested.add(name);
 			void fetchPartial(
 				page,
 				page.url,
@@ -656,6 +707,9 @@ export type Method = "get" | "post" | "put" | "patch" | "delete";
 /** What a visit sends: fields, or a ready `FormData`. */
 export type RequestPayload = Record<string, unknown> | FormData;
 
+/** The base a relative `withQuery` input is parsed against. */
+const RELATIVE_BASE = "http://photon.invalid";
+
 /**
  * `path` with `data` merged into its query string, nested keys as
  * `a[b]=…` and arrays as `a[]=…` — `mergeDataIntoQueryString` in
@@ -667,7 +721,7 @@ export function withQuery(
 ): string {
 	if (data === undefined || data instanceof FormData) return path;
 	if (Object.keys(data).length === 0) return path;
-	const url = new URL(path, "http://photon.invalid");
+	const url = new URL(path, RELATIVE_BASE);
 	const pairs: Array<[string, string]> = [];
 	const build = (value: unknown, prefix: string): void => {
 		if (value === undefined) return;
@@ -686,9 +740,31 @@ export function withQuery(
 	}
 	for (const [key, value] of pairs) url.searchParams.append(key, value);
 	// An absolute URL keeps its origin; a path stays a path.
-	return /^[a-z][a-z\d+\-.]*:/i.test(path)
-		? url.href
-		: url.pathname + url.search + url.hash;
+	if (/^[a-z][a-z\d+\-.]*:/i.test(path)) return url.href;
+	// `//host/x` (or `/\\host/x`) names its own host: kept, scheme-relative.
+	if (namesHost(path)) return `//${url.host}${pathOf(url)}`;
+	return pathOf(url);
+}
+
+/**
+ * The path, query and fragment of `url`, as a string that resolves to the same
+ * place on the same origin. A path starting with `//` would be read as another
+ * host once written back alone (`//evil.example/x`); `/.` in front keeps it the
+ * same path on the same origin.
+ */
+export function pathOf(url: URL): string {
+	const path = url.pathname.startsWith("//")
+		? `/.${url.pathname}`
+		: url.pathname;
+	return path + url.search + url.hash;
+}
+
+/** Whether a relative URL names its own host: it resolves the same on any base. */
+function namesHost(path: string): boolean {
+	return (
+		new URL(path, RELATIVE_BASE).host ===
+		new URL(path, "http://photon-other.invalid").host
+	);
 }
 
 /** Whether `value` holds a file anywhere — which makes a body multipart. */
@@ -818,10 +894,18 @@ async function applyPartial(
 	const stillCurrent = (): boolean =>
 		seq === navigationSeq && currentPage?.component === page.component;
 	const what = request.only?.join(", ") ?? "props";
+	// Checked right before the request: a page's `url` came from the server.
+	const target = sameOriginUrl(url);
+	if (target === null) {
+		console.error(
+			`[photon] partial reload of ${what} from '${url}' refused: it does not stay on this origin.`,
+		);
+		return false;
+	}
 
 	let response: Response;
 	try {
-		response = await host().fetch(url, {
+		response = await host().fetch(requestHref(target), {
 			headers: {
 				...request.headers,
 				...exceptOnceHeader(),
@@ -850,8 +934,10 @@ async function applyPartial(
 	}
 	if (!stillCurrent()) return false;
 	if (response.status === 409) {
-		const target = response.headers.get(LOCATION_HEADER);
-		fallbackToFullReload(target !== null && isHttpUrl(target) ? target : url);
+		const location = response.headers.get(LOCATION_HEADER);
+		fallbackToFullReload(
+			location !== null && isHttpUrl(location) ? location : target.href,
+		);
 		return false;
 	}
 	const contentType = response.headers.get("content-type") ?? "";
@@ -939,11 +1025,34 @@ async function applyPartial(
 	request.onSuccess?.(next);
 	announceSuccess(next);
 	if (!background) announceFlash(loaded.flash);
+	else reportMissingDeferred(request.only ?? [], loaded);
 	// A reload can announce deferred groups of its own.
 	if (loaded.deferredProps !== undefined && stillCurrent()) {
 		loadDeferredProps(next, options);
 	}
 	return true;
+}
+
+/**
+ * Report the deferred props an answer left out — neither carried nor rescued.
+ * They are not asked for again on this visit, so the report is the end of it:
+ * `photon:exception` with an `E_PHOTON_DEFERRED_PROPS_MISSING`.
+ */
+function reportMissingDeferred(
+	asked: readonly string[],
+	loaded: PhotonPageData,
+): void {
+	const rescued = loaded.rescuedProps ?? [];
+	const missing = asked.filter(
+		(name) => !(name in loaded.props) && !rescued.includes(name),
+	);
+	if (missing.length === 0) return;
+	const exception = new E_PHOTON_DEFERRED_PROPS_MISSING(
+		`[photon] the answer to the deferred props ${missing.join(", ")} did not carry them; they are not asked for again on this visit.`,
+		{ context: { props: missing } },
+	);
+	console.error(exception.message);
+	announce("exception", { exception });
 }
 
 /**
@@ -976,6 +1085,11 @@ export interface RouterEvents {
 	finish: { visit: Visit };
 	success: { page: PhotonPageData };
 	flash: { flash: object };
+	/**
+	 * A failure the router reports instead of throwing — `inertia:exception`.
+	 * Today: a deferred group answered without its props.
+	 */
+	exception: { exception: Error };
 }
 
 /** Who listens through `router.on`, per event. */
@@ -987,6 +1101,7 @@ const listeners: {
 	finish: new Set(),
 	success: new Set(),
 	flash: new Set(),
+	exception: new Set(),
 };
 
 /**
@@ -1200,8 +1315,9 @@ export const router = {
 		}
 		const method = visitOptions.method ?? "get";
 		// A GET sends its data in the query; any other method in its body.
+		// The absolute address: its path alone may name another host.
 		const path = withQuery(
-			resolved.pathname + resolved.search + resolved.hash,
+			resolved.href,
 			method === "get" ? visitOptions.data : undefined,
 		);
 		const page = currentPage;

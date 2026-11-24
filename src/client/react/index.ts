@@ -899,7 +899,7 @@ export const Link = forwardRef(LinkComponent);
 type FormValues = Record<string, unknown>;
 
 /** What `useForm` returns: the form's state, and what changes or submits it. */
-export type InertiaFormProps<T extends FormValues> = FormState<T> &
+export type PhotonForm<T extends FormValues> = FormState<T> &
 	Omit<FormStore<T>, "getSnapshot" | "subscribe" | "dispose">;
 
 /**
@@ -911,15 +911,15 @@ export type InertiaFormProps<T extends FormValues> = FormState<T> &
  */
 export function useForm<T extends FormValues>(
 	data: T | (() => T),
-): InertiaFormProps<T>;
+): PhotonForm<T>;
 export function useForm<T extends FormValues>(
 	rememberKey: string,
 	data: T | (() => T),
-): InertiaFormProps<T>;
+): PhotonForm<T>;
 export function useForm<T extends FormValues>(
 	keyOrData: string | T | (() => T),
 	maybeData?: T | (() => T),
-): InertiaFormProps<T> {
+): PhotonForm<T> {
 	const [store] = useState(() => {
 		if (typeof keyOrData === "string") {
 			if (maybeData === undefined) {

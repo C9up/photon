@@ -157,3 +157,50 @@ describe("photon > page url", () => {
 		expect(JSON.parse(written.body ?? "{}").url).toBe("/p");
 	});
 });
+
+describe("photon > page url on a path a browser reads as a host", () => {
+	const orig = process.env.NODE_ENV;
+	beforeEach(() => {
+		process.env.NODE_ENV = "development";
+	});
+	afterEach(() => {
+		if (orig === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = orig;
+	});
+	const ORIGIN = "https://app.example";
+	const at = (path: string) => ({
+		path: () => path.split("?")[0],
+		url: (includeQs = false) => (includeQs ? path : path.split("?")[0]),
+	});
+
+	it.each([
+		["//evil.example/x?a=1", "/.//evil.example/x?a=1"],
+		["/\\evil.example/x", "/./\\evil.example/x"],
+		["/\t/evil.example/x", "/./\t/evil.example/x"],
+	])("writes %j as a path on the same origin", async (raw, expected) => {
+		const written = await serve({}, at(raw));
+		const url = String(pageDataOf(written.body).url);
+		expect(url).toBe(expected);
+		// Read back by a browser: the same path, on the same origin.
+		const resolved = new URL(url, `${ORIGIN}/`);
+		expect(resolved.origin).toBe(ORIGIN);
+		expect(resolved.pathname).toBe(new URL(`${ORIGIN}/.${raw}`).pathname);
+	});
+
+	it("never sends a stale-version reload to another host", async () => {
+		const written = await serve(
+			{ "x-photon": "true", "x-photon-version": "stale" },
+			at("//evil.example/x"),
+			false,
+		);
+		expect(written.status).toBe(409);
+		const location = written.headers["x-photon-location"] ?? "";
+		expect(location).toBe("/.//evil.example/x");
+		expect(new URL(location, `${ORIGIN}/`).origin).toBe(ORIGIN);
+	});
+
+	it("keeps an ordinary path as it is", async () => {
+		const written = await serve({}, at("/a//b?c=1"));
+		expect(pageDataOf(written.body).url).toBe("/a//b?c=1");
+	});
+});

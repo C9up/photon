@@ -73,6 +73,15 @@ export const E_PHOTON_INVALID_DEFERRED = photonClientErrorClass(
 	"E_PHOTON_INVALID_DEFERRED",
 );
 
+/**
+ * The answer to a deferred group did not carry the props it was asked for.
+ * Reported (on the `exception` router event), never thrown: the group is not
+ * asked for again on this visit.
+ */
+export const E_PHOTON_DEFERRED_PROPS_MISSING = photonClientErrorClass(
+	"E_PHOTON_DEFERRED_PROPS_MISSING",
+);
+
 /** A form helper was used without its initial data. */
 export const E_PHOTON_FORM_DATA_MISSING = photonClientErrorClass(
 	"E_PHOTON_FORM_DATA_MISSING",

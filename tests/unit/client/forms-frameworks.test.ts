@@ -15,6 +15,7 @@ import {
 	beforeEach,
 	describe,
 	expect,
+	expectTypeOf,
 	it,
 	vi,
 } from "vitest";
@@ -22,13 +23,21 @@ import { createApp, defineComponent, h, nextTick } from "vue";
 import {
 	type FormProps,
 	Form as ReactForm,
+	type PhotonForm as ReactPhotonForm,
 	useForm as useReactForm,
 } from "../../../src/client/react/index.js";
 import { bootRouter } from "../../../src/client/router.js";
 import { setRoutes } from "../../../src/client/routes.js";
+import type {
+	PhotonForm as SveltePhotonForm,
+	PhotonFormExtras as SveltePhotonFormExtras,
+	useForm as useSvelteForm,
+} from "../../../src/client/svelte/index.js";
 import {
 	useForm as createVueForm,
 	Form as VueForm,
+	type PhotonForm as VuePhotonForm,
+	type PhotonFormExtras as VuePhotonFormExtras,
 } from "../../../src/client/vue/index.js";
 
 beforeAll(() => {
@@ -121,6 +130,27 @@ function Signup(): ReactNode {
 		),
 	);
 }
+
+describe("photon > useForm's return type", () => {
+	it("is named PhotonForm in every entry, with its extras as PhotonFormExtras", () => {
+		type Fields = { name: string };
+		expectTypeOf<ReturnType<typeof useReactForm<Fields>>>().toEqualTypeOf<
+			ReactPhotonForm<Fields>
+		>();
+		expectTypeOf<ReturnType<typeof createVueForm<Fields>>>().toEqualTypeOf<
+			VuePhotonForm<Fields>
+		>();
+		expectTypeOf<VuePhotonForm<Fields>>().toEqualTypeOf<
+			Fields & VuePhotonFormExtras<Fields>
+		>();
+		expectTypeOf<ReturnType<typeof useSvelteForm<Fields>>>().toEqualTypeOf<
+			SveltePhotonForm<Fields>
+		>();
+		expectTypeOf<SveltePhotonForm<Fields>>().toEqualTypeOf<
+			Fields & SveltePhotonFormExtras<Fields>
+		>();
+	});
+});
 
 describe("photon/react > useForm", () => {
 	it("shows the page's errors, then submits what was typed", async () => {
@@ -221,7 +251,7 @@ describe("photon/react > Form on a named route", () => {
 		expect(form?.getAttribute("method")).toBe("put");
 		await act(async () => target.querySelector("button")?.click());
 		await until(() => fetchMock.mock.calls.length === 1, "the submission");
-		expect(fetchMock.mock.calls[0]?.[0]).toBe("/users/5");
+		expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:3000/users/5");
 		expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT");
 	});
 });

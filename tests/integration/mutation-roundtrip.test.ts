@@ -145,7 +145,9 @@ describe("photon > a mutation, client to server and back", () => {
 
 		await router.put("/orders/1", { qty: 5 });
 
-		expect(seen).toEqual([{ method: "PUT", path: "/orders/1" }]);
+		expect(seen).toEqual([
+			{ method: "PUT", path: "http://localhost:3000/orders/1" },
+		]);
 		// The handler said 302; the middleware made it the 303 that a PUT needs.
 		expect(statuses).toEqual([303]);
 		expect(orders.get("1")).toEqual({ qty: 5 });
